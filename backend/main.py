@@ -75,11 +75,12 @@ async def search(file: UploadFile):
         db_valid = False
 
     for r, score in results:
-        similarity = round((1 - score) * 100, 2)
-        
+        # Cap similarity to [0, 100] — handles cosine distance (0=identical)
+        similarity = round(max(0.0, min(100.0, (1 - score) * 100)), 2)
+
         pg_id = r.metadata.get("postgres_id")
         file_name = r.metadata.get("source", "Unknown")
-        
+
         if pg_id and db_valid:
             cur.execute("SELECT filename FROM documents WHERE id = %s", (pg_id,))
             pg_doc = cur.fetchone()
@@ -89,6 +90,7 @@ async def search(file: UploadFile):
         output.append({
             "file": file_name,
             "text": r.page_content[:200],
+            "full_text": r.page_content[:3000],
             "similarity": similarity
         })
 

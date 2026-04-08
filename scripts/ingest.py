@@ -56,8 +56,7 @@ def ingest():
             # Add to ChromaDB linked via Postgres ID
             db.add_texts([text], metadatas=[{"postgres_id": doc_id, "source": file}])
 
-    # Save DB
-    db.persist()
+    # ChromaDB v0.4+ auto-persists — no need to call db.persist()
     cur.close()
     conn.close()
     print("✅ All documents stored in ChromaDB and PostgreSQL")
