@@ -1,24 +1,26 @@
 import os
-import sys
+import psycopg2
 from extract_text import extract_text
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
+from dotenv import load_dotenv
 
-# Add backend to path to import database and models
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'backend'))
-from database import SessionLocal
-import models
+# load the global env
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-# Load embedding model
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/postgres")
+
 embeddings = OpenAIEmbeddings()
-
-# Create DB
 db = Chroma(persist_directory="../db", embedding_function=embeddings)
-
 DOCUMENTS_PATH = "../documents"
 
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
+
 def ingest():
-    db_session = SessionLocal()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
     for file in os.listdir(DOCUMENTS_PATH):
         if file.endswith(".pdf"):
             path = os.path.join(DOCUMENTS_PATH, file)
@@ -26,26 +28,30 @@ def ingest():
 
             print(f"Processing: {file}")
 
-            # 1. Add to Postgres first to get the unique ID
-            db_doc = db_session.query(models.DocumentMetadata).filter_by(filename=file).first()
+            # Check if file exists in DB
+            cur.execute("SELECT id FROM documents WHERE filename = %s", (file,))
+            db_doc = cur.fetchone()
+            
             if not db_doc:
-                db_doc = models.DocumentMetadata(
-                    filename=file,
-                    file_path=path,
-                    file_size=file_size
+                # Insert and return ID directly
+                cur.execute(
+                    "INSERT INTO documents (filename, file_path, file_size) VALUES (%s, %s, %s) RETURNING id",
+                    (file, path, file_size)
                 )
-                db_session.add(db_doc)
-                db_session.commit()
-                db_session.refresh(db_doc)
+                doc_id = cur.fetchone()[0]
+                conn.commit()
+            else:
+                doc_id = db_doc[0]
 
             text = extract_text(path)
 
-            # 2. Add to ChromaDB linked via the Postgres ID
-            db.add_texts([text], metadatas=[{"postgres_id": db_doc.id, "source": file}])
+            # Add to ChromaDB linked via Postgres ID
+            db.add_texts([text], metadatas=[{"postgres_id": doc_id, "source": file}])
 
     # Save DB
     db.persist()
-    db_session.close()
+    cur.close()
+    conn.close()
     print("✅ All documents stored in ChromaDB and PostgreSQL")
 
 if __name__ == "__main__":
