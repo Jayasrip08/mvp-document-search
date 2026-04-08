@@ -1,6 +1,14 @@
 import os
 import psycopg2
-from extract_text import extract_text
+import fitz
+
+def extract_text(pdf_path):
+    doc = fitz.open(pdf_path)
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    return text
+
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
