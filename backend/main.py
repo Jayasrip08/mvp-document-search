@@ -3,7 +3,7 @@ load_dotenv()
 from fastapi import FastAPI, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 import fitz
 import os
@@ -49,9 +49,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ Load bindings
-embeddings = OpenAIEmbeddings()
-db = Chroma(persist_directory="../db", embedding_function=embeddings)
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+db = Chroma(persist_directory=os.path.join(BASE_DIR, "db"), embedding_function=embeddings)
 
 def extract_text(file):
     pdf = fitz.open(stream=file.file.read(), filetype="pdf")
@@ -105,7 +105,7 @@ async def search(file: UploadFile):
 
 @app.get("/document/{filename}")
 def get_document(filename: str):
-    file_path = f"../documents/{filename}"
+    file_path = os.path.join(BASE_DIR, "documents", filename)
     if os.path.exists(file_path):
         return FileResponse(file_path, filename=filename)
     return {"error": "File not found"}
