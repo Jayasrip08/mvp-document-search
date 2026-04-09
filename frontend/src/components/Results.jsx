@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-/* ── helpers ─────────────────────────────────── */
+/* ── helpers ─────────────────────────────────────── */
 function getBadgeClass(score) {
   if (score >= 75) return "high";
   if (score >= 50) return "mid";
@@ -8,28 +8,39 @@ function getBadgeClass(score) {
 }
 
 function getBadgeLabel(score) {
-  if (score >= 75) return "✅ High match";
-  if (score >= 50) return "⚠️ Moderate";
-  return "🔴 Low match";
+  if (score >= 75) return "High Match";
+  if (score >= 50) return "Moderate";
+  return "Low Match";
 }
 
-/* ── Full-text Modal ─────────────────────────── */
+function getBadgeEmoji(score) {
+  if (score >= 75) return "✅";
+  if (score >= 50) return "🔶";
+  return "🔴";
+}
+
+/* ── Full-text Modal ─────────────────────────────── */
 function TextModal({ item, onClose }) {
   const badgeClass = getBadgeClass(item.similarity);
 
-  // Close on overlay click
   const handleOverlayClick = (e) => {
     if (e.target === e.currentTarget) onClose();
   };
 
   return (
-    <div className="modal-overlay" onClick={handleOverlayClick} role="dialog" aria-modal="true" aria-label="Full document text">
+    <div
+      className="modal-overlay"
+      onClick={handleOverlayClick}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Full document text"
+    >
       <div className="modal-box">
         {/* Header */}
         <div className="modal-header">
           <div className="modal-title">
-            <span>📄</span>
-            <span className="filename-text">{item.file}</span>
+            <div className="modal-title-icon">📄</div>
+            <span className="modal-title-text">{item.file}</span>
           </div>
           <button
             className="modal-close"
@@ -40,10 +51,10 @@ function TextModal({ item, onClose }) {
           </button>
         </div>
 
-        {/* Meta row */}
+        {/* Meta */}
         <div className="modal-meta">
           <span className={`match-badge ${badgeClass}`}>
-            {getBadgeLabel(item.similarity)} — {item.similarity}%
+            {getBadgeEmoji(item.similarity)}&nbsp;{getBadgeLabel(item.similarity)} — {item.similarity}%
           </span>
         </div>
 
@@ -64,7 +75,10 @@ function TextModal({ item, onClose }) {
             className="btn-download"
             aria-label={`Download ${item.file}`}
           >
-            📥 Download Document
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download Document
           </a>
         </div>
       </div>
@@ -72,7 +86,7 @@ function TextModal({ item, onClose }) {
   );
 }
 
-/* ── Single Result Card ──────────────────────── */
+/* ── Single Result Card ──────────────────────────── */
 function ResultCard({ item, index, onExpand }) {
   const badgeClass = getBadgeClass(item.similarity);
 
@@ -84,11 +98,14 @@ function ResultCard({ item, index, onExpand }) {
       {/* Top row */}
       <div className="card-top">
         <div className="card-filename">
-          <span className="file-icon">📄</span>
-          <span className="filename-text" title={item.file}>{item.file}</span>
+          <div className="file-icon-box">📄</div>
+          <div>
+            <div className="filename-text" title={item.file}>{item.file}</div>
+            <div className="filename-sub">PDF Document</div>
+          </div>
         </div>
         <span className={`match-badge ${badgeClass}`}>
-          {getBadgeLabel(item.similarity)} {item.similarity}%
+          {getBadgeEmoji(item.similarity)}&nbsp;{getBadgeLabel(item.similarity)}&nbsp;·&nbsp;{item.similarity}%
         </span>
       </div>
 
@@ -112,7 +129,10 @@ function ResultCard({ item, index, onExpand }) {
           onClick={() => onExpand(item)}
           aria-label={`View full text for ${item.file}`}
         >
-          📖 View Full Text
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+          View Full Text
         </button>
 
         <a
@@ -122,22 +142,28 @@ function ResultCard({ item, index, onExpand }) {
           className="btn-download"
           onClick={(e) => e.stopPropagation()}
         >
-          📥 Download
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download
         </a>
       </div>
     </div>
   );
 }
 
-/* ── Results Panel ───────────────────────────── */
+/* ── Results Panel ───────────────────────────────── */
 function Results({ results, count }) {
   const [modalItem, setModalItem] = useState(null);
 
   if (results.length === 0) {
     return (
       <div className="empty-state">
-        <span className="empty-state-icon">🗂️</span>
-        <p>Upload a PDF above to find similar documents</p>
+        <div className="empty-state-iconbox">🗂️</div>
+        <div className="empty-state-title">No results yet</div>
+        <p className="empty-state-sub">
+          Upload a PDF above to find semantically similar documents in your library.
+        </p>
       </div>
     );
   }
@@ -148,9 +174,11 @@ function Results({ results, count }) {
         {/* Header */}
         <div className="results-header">
           <h2 className="results-headline">
-            We found <span>{count}</span> similar document{count !== 1 ? "s" : ""}
+            Found <em>{count}</em> similar document{count !== 1 ? "s" : ""}
           </h2>
-          <span className="results-badge">{count} results</span>
+          <span className="results-count-badge">
+            ✦ {count} result{count !== 1 ? "s" : ""}
+          </span>
         </div>
 
         {/* Cards */}

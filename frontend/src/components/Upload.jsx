@@ -1,13 +1,13 @@
 import { useState, useRef, useCallback } from "react";
 
 function Upload({ setResults, setCount }) {
-  const [file, setFile]           = useState(null);
+  const [file,      setFile]      = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError]         = useState(null);
-  const [dragOver, setDragOver]   = useState(false);
-  const inputRef                  = useRef(null);
+  const [error,     setError]     = useState(null);
+  const [dragOver,  setDragOver]  = useState(false);
+  const inputRef = useRef(null);
 
-  /* ── file selection helpers ── */
+  /* ── file selection ── */
   const pickFile = (selected) => {
     if (!selected) return;
     if (selected.type !== "application/pdf") {
@@ -18,7 +18,7 @@ function Upload({ setResults, setCount }) {
     setError(null);
   };
 
-  /* ── drag-and-drop handlers ── */
+  /* ── drag-and-drop ── */
   const onDragOver  = useCallback((e) => { e.preventDefault(); setDragOver(true);  }, []);
   const onDragLeave = useCallback((e) => { e.preventDefault(); setDragOver(false); }, []);
   const onDrop      = useCallback((e) => {
@@ -27,13 +27,9 @@ function Upload({ setResults, setCount }) {
     pickFile(e.dataTransfer.files[0]);
   }, []);
 
-  /* ── main search handler ── */
+  /* ── search ── */
   const handleUpload = async () => {
-    if (!file) {
-      setError("Please select a PDF file before searching.");
-      return;
-    }
-
+    if (!file) { setError("Please select a PDF file before searching."); return; }
     setIsLoading(true);
     setError(null);
     setResults([]);
@@ -50,7 +46,7 @@ function Upload({ setResults, setCount }) {
 
       if (!res.ok) {
         const detail = await res.text();
-        throw new Error(`Server error (${res.status}): ${detail || "Unexpected response from server."}`);
+        throw new Error(`Server error (${res.status}): ${detail || "Unexpected response."}`);
       }
 
       const data = await res.json();
@@ -69,7 +65,8 @@ function Upload({ setResults, setCount }) {
 
   return (
     <div className="upload-wrapper">
-      {/* Drop zone */}
+
+      {/* ── Drop Zone ── */}
       <div
         className={`drop-zone${dragOver ? " drag-over" : ""}`}
         onClick={() => inputRef.current?.click()}
@@ -90,49 +87,57 @@ function Upload({ setResults, setCount }) {
           onChange={(e) => pickFile(e.target.files[0])}
         />
 
-        <span className="drop-zone-icon">📄</span>
-        <div className="drop-zone-title">
-          {file ? "Change document" : "Drop your PDF here"}
-        </div>
-        <div className="drop-zone-sub">
-          {file ? (
-            <span style={{ color: "var(--accent-teal)" }}>File selected — click to change</span>
-          ) : (
-            <>or <span>browse to upload</span> · PDF only</>
-          )}
+        <div className="drop-zone-inner">
+          <div className="drop-zone-iconbox">
+            {file ? "📄" : "📂"}
+          </div>
+          <div className="drop-zone-title">
+            {file ? "Document ready" : "Drop your PDF here"}
+          </div>
+          <div className="drop-zone-sub">
+            {file
+              ? <span className="highlight">Click to change file</span>
+              : <>or <span className="highlight">browse to upload</span></>
+            }
+          </div>
+          <div className="drop-zone-tags">
+            <span className="drop-zone-tag">PDF only</span>
+            <span className="drop-zone-tag">Any size</span>
+            <span className="drop-zone-tag">Drag &amp; drop</span>
+          </div>
         </div>
       </div>
 
-      {/* Selected file badge */}
+      {/* ── File badge ── */}
       {file && !isLoading && (
         <div className="file-badge">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
-          </svg>
-          {file.name}
-          <span style={{ opacity: 0.6, fontWeight: 400, marginLeft: 4 }}>
-            ({(file.size / 1024).toFixed(1)} KB)
+          <div className="file-badge-icon">📄</div>
+          <span className="file-badge-name">{file.name}</span>
+          <span className="file-badge-size">
+            {file.size >= 1024 * 1024
+              ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+              : `${(file.size / 1024).toFixed(1)} KB`}
           </span>
         </div>
       )}
 
-      {/* Spinner */}
+      {/* ── Spinner ── */}
       {isLoading && (
         <div className="spinner-wrapper">
-          <div className="spinner" role="status" aria-label="Searching" />
-          <span className="spinner-text">Analyzing document &amp; searching</span>
+          <div className="spinner-ring" role="status" aria-label="Searching" />
+          <span className="spinner-text">Analyzing &amp; searching</span>
         </div>
       )}
 
-      {/* Error banner */}
+      {/* ── Error banner ── */}
       {error && (
         <div className="error-banner" role="alert">
           <span className="error-banner-icon">⚠️</span>
-          <span>{error}</span>
+          <span className="error-banner-text">{error}</span>
         </div>
       )}
 
-      {/* Search button */}
+      {/* ── Search button ── */}
       {!isLoading && (
         <button
           id="search-btn"
@@ -141,7 +146,10 @@ function Upload({ setResults, setCount }) {
           disabled={!file}
           aria-label="Upload and search for similar documents"
         >
-          🔍 &nbsp;Upload &amp; Search Similar Documents
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          Upload &amp; Find Similar Documents
         </button>
       )}
     </div>
