@@ -72,46 +72,55 @@ db = Chroma(
 
 def load_documents_to_db():
     if not os.path.exists(DOCS_PATH):
-        print("[ERROR] 'documents' folder not found")
+        os.makedirs(DOCS_PATH, exist_ok=True)
         return
 
-    documents = []
-    ids = []
+    conn = get_db_connection()
+    cur = conn.cursor()
 
     for file in os.listdir(DOCS_PATH):
         if file.endswith(".pdf"):
             file_path = os.path.join(DOCS_PATH, file)
+            file_size = os.path.getsize(file_path)
 
+            # 1. Sync with PostgreSQL
+            cur.execute("SELECT id FROM documents WHERE filename = %s", (file,))
+            if not cur.fetchone():
+                cur.execute(
+                    "INSERT INTO documents (filename, file_path, file_size) VALUES (%s, %s, %s)",
+                    (file, file_path, file_size)
+                )
+                conn.commit()
+
+            # 2. Sync with ChromaDB
             try:
-                with open(file_path, "rb") as f:
-                    pdf = fitz.open(stream=f.read(), filetype="pdf")
-                    
-                    # Store pages separately for page-level retrieval
-                    for page_num, page in enumerate(pdf, start=1):
-                        text = page.get_text()
-                        if text.strip():
-                            # Create a deterministic ID for each page
-                            doc_id = f"{file}_p{page_num}"
-                            
-                            documents.append(
-                                Document(
-                                    page_content=text,
-                                    metadata={"source": file, "page": page_num}
+                # Check if file is already in Chroma by querying metadatas
+                existing = db.get(where={"source": file})
+                if not existing or not existing['ids']:
+                    with open(file_path, "rb") as f:
+                        pdf = fitz.open(stream=f.read(), filetype="pdf")
+                        documents = []
+                        ids = []
+                        for page_num, page in enumerate(pdf, start=1):
+                            text = page.get_text()
+                            if text.strip():
+                                doc_id = f"{file}_p{page_num}"
+                                documents.append(
+                                    Document(
+                                        page_content=text,
+                                        metadata={"source": file, "page": page_num}
+                                    )
                                 )
-                            )
-                            ids.append(doc_id)
-
-                print(f"[OK] Loaded: {file} ({pdf.page_count} pages)")
-
+                                ids.append(doc_id)
+                        
+                        if documents:
+                            db.add_documents(documents, ids=ids)
+                            print(f"[OK] Indexed: {file}")
             except Exception as e:
-                print(f"[ERROR] Error loading {file}: {e}")
+                print(f"[ERROR] Syncing {file}: {e}")
 
-    if documents:
-        # Using ids ensures that re-indexing the same file updates existing entries instead of duplicating
-        db.add_documents(documents, ids=ids)
-        print(f"[DONE] Total chunks indexed: {len(documents)}")
-    else:
-        print("[INFO] No new documents to load")
+    cur.close()
+    conn.close()
 
 # 🔥 Load documents on startup
 load_documents_to_db()
@@ -127,8 +136,55 @@ def extract_text(file):
 
 @app.post("/search")
 async def search(file: UploadFile):
-    text = extract_text(file)
-    results = db.similarity_search_with_score(text, k=15)
+    # 1. Save file to disk
+    os.makedirs(DOCS_PATH, exist_ok=True)
+    file_path = os.path.join(DOCS_PATH, file.filename)
+    
+    file_content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(file_content)
+    
+    file_size = len(file_content)
+
+    # 2. Update PostgreSQL
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM documents WHERE filename = %s", (file.filename,))
+    if not cur.fetchone():
+        cur.execute(
+            "INSERT INTO documents (filename, file_path, file_size) VALUES (%s, %s, %s)",
+            (file.filename, file_path, file_size)
+        )
+        conn.commit()
+    cur.close()
+    conn.close()
+
+    # 3. Process with fitz (PyMuPDF)
+    pdf = fitz.open(stream=file_content, filetype="pdf")
+    
+    # 4. Update ChromaDB
+    documents = []
+    ids = []
+    full_text = ""
+    for page_num, page in enumerate(pdf, start=1):
+        text = page.get_text()
+        if text.strip():
+            full_text += text
+            doc_id = f"{file.filename}_p{page_num}"
+            documents.append(
+                Document(
+                    page_content=text,
+                    metadata={"source": file.filename, "page": page_num}
+                )
+            )
+            ids.append(doc_id)
+    
+    if documents:
+        db.add_documents(documents, ids=ids)
+
+    # 5. Search
+    # We use the extracted text to search from the updated DB
+    results = db.similarity_search_with_score(full_text[:5000], k=15)
     return format_search_results(results)
 
 def format_search_results(results):
