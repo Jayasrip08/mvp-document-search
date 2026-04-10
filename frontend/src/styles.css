@@ -209,6 +209,41 @@ html.dark body::before {
   box-shadow: var(--shadow-sm);
 }
 
+.btn-danger-outline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  background: rgba(220, 38, 38, 0.05);
+  border: 1.5px solid rgba(220, 38, 38, 0.3);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: var(--transition);
+  color: var(--danger);
+  font-size: 0.82rem;
+  font-weight: 650;
+  font-family: 'Inter', sans-serif;
+  white-space: nowrap;
+}
+
+.btn-danger-outline:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+  transform: translateY(-1px);
+}
+
+.btn-danger-outline:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-danger-outline:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
 .theme-toggle-track {
   width: 36px;
   height: 20px;
@@ -1226,3 +1261,160 @@ html.dark .modal-text-body {
   .btn-search    { font-size: 0.95rem; }
   .hero-stats    { gap: 16px; }
 }
+
+/* ─── Search Bar ─────────────────────────────────── */
+.search-bar-wrapper {
+  margin-bottom: 24px;
+  animation: fadeSlideUp 0.6s ease 0.05s both;
+}
+
+.search-card {
+  padding: 12px;
+  transition: transform 0.3s ease, border-color 0.3s ease;
+}
+
+.search-form {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.search-input-container {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-input {
+  width: 100%;
+  padding: 14px 44px 14px 18px;
+  background: var(--bg-surface-2);
+  border: 1.5px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: var(--transition);
+  outline: none;
+}
+
+html.dark .search-input {
+  background: rgba(15, 21, 32, 0.8);
+}
+
+.search-input:focus {
+  border-color: var(--accent-blue);
+  background: var(--bg-surface);
+  box-shadow: 0 0 0 4px rgba(79, 110, 247, 0.08);
+}
+
+.clear-btn {
+  position: absolute;
+  right: 14px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--glass-border);
+  border: none;
+  color: var(--text-muted);
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.clear-btn:hover {
+  background: var(--text-muted);
+  color: var(--bg-surface);
+}
+
+.btn-search-text {
+  padding: 14px 24px;
+  background: var(--accent-grad);
+  border: none;
+  border-radius: var(--radius-md);
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(79, 110, 247, 0.25);
+  white-space: nowrap;
+}
+
+.btn-search-text:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(79, 110, 247, 0.35);
+  background: var(--accent-grad-hover);
+}
+
+.btn-search-text:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.mini-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+/* ─── Extra Animations ────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes dots {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+}
+
+/* ─── Metadata & Stats ───────────────────────────── */
+.highlight-count {
+  color: var(--accent-blue);
+  font-weight: 800;
+  background: rgba(79, 110, 247, 0.1);
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(79, 110, 247, 0.15);
+}
+
+.page-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: var(--bg-surface-2);
+  border: 1.5px solid var(--glass-border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  transition: var(--transition);
+}
+
+html.dark .page-badge {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.filename-sub {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-top: 2px;
+}
+

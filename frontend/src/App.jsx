@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import Upload from "./components/Upload";
+import SearchBar from "./components/SearchBar";
 import Results from "./components/Results";
 import "./styles.css";
 
@@ -14,6 +15,8 @@ function App() {
   const [results, setResults] = useState([]);
   const [count,   setCount]   = useState(0);
   const [dark,    setDark]    = useState(getInitialTheme);
+  const [docCount, setDocCount] = useState(0);
+  const [isResetting, setIsResetting] = useState(false);
 
   /* Apply / remove .dark class on <html> */
   useEffect(() => {
@@ -25,6 +28,43 @@ function App() {
       localStorage.setItem("docsearch-theme", "light");
     }
   }, [dark]);
+
+  /* Fetch library stats */
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:8000/stats");
+        const data = await res.json();
+        setDocCount(data.document_count || 0);
+      } catch (err) {
+        console.error("Failed to fetch stats:", err);
+      }
+    };
+    fetchStats();
+  }, []);
+
+  const handleReset = async () => {
+    if (!window.confirm("Are you sure you want to clean the entire database? This will delete all indexed documents and source files.")) return;
+
+    setIsResetting(true);
+    try {
+      const res = await fetch("http://127.0.0.1:8000/reset", { method: "POST" });
+      const data = await res.json();
+      if (data.status === "success") {
+        setResults([]);
+        setCount(0);
+        setDocCount(0);
+        // Page refresh or state clear is handled
+      } else {
+        alert("Error: " + data.message);
+      }
+    } catch (err) {
+      console.error("Reset failed:", err);
+      alert("Failed to reach server.");
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   return (
     <>
@@ -39,6 +79,15 @@ function App() {
         </div>
 
         <div className="navbar-actions">
+          <button
+            className="btn-danger-outline"
+            onClick={handleReset}
+            disabled={isResetting}
+            title="Wipe database and start fresh"
+          >
+            {isResetting ? "Cleaning..." : "Reset Database"}
+          </button>
+
           {/* Dark / Light toggle */}
           <button
             id="theme-toggle-btn"
@@ -70,8 +119,9 @@ function App() {
                 <span className="gradient-text">Semantically</span>
               </h1>
               <p>
+                Searching across <span className="highlight-count">{docCount} documents</span>. 
                 Upload any PDF and instantly discover the most relevant documents
-                in your library using state-of-the-art semantic embeddings.
+                using semantic embeddings.
               </p>
               <div className="hero-stats">
                 <span className="stat-chip">
@@ -88,6 +138,9 @@ function App() {
                 </span>
               </div>
             </header>
+
+            {/* Search Bar */}
+            <SearchBar setResults={setResults} setCount={setCount} />
 
             {/* Upload card */}
             <div className="upload-section">

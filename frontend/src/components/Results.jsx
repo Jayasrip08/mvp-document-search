@@ -56,6 +56,11 @@ function TextModal({ item, onClose }) {
           <span className={`match-badge ${badgeClass}`}>
             {getBadgeEmoji(item.similarity)}&nbsp;{getBadgeLabel(item.similarity)} — {item.similarity}%
           </span>
+          {item.matching_pages && item.matching_pages.length > 0 && (
+            <span className="page-badge">
+              📄 Matches on Pages: {item.matching_pages.join(", ")}
+            </span>
+          )}
         </div>
 
         <div className="modal-divider" />
@@ -101,7 +106,9 @@ function ResultCard({ item, index, onExpand }) {
           <div className="file-icon-box">📄</div>
           <div>
             <div className="filename-text" title={item.file}>{item.file}</div>
-            <div className="filename-sub">PDF Document</div>
+            <div className="filename-sub">
+              PDF Document {item.matching_pages && item.matching_pages.length > 0 && `· Found on Pages: ${item.matching_pages.join(", ")}`}
+            </div>
           </div>
         </div>
         <span className={`match-badge ${badgeClass}`}>
