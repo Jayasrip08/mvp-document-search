@@ -9,7 +9,7 @@ def extract_text(pdf_path):
         text += page.get_text()
     return text
 
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
 
@@ -18,9 +18,10 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/postgres")
 
-embeddings = OpenAIEmbeddings()
-db = Chroma(persist_directory="../db", embedding_function=embeddings)
-DOCUMENTS_PATH = "../documents"
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+db = Chroma(persist_directory=os.path.join(BASE_DIR, "db"), embedding_function=embeddings)
+DOCUMENTS_PATH = os.path.join(BASE_DIR, "documents")
 
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
@@ -42,9 +43,10 @@ def ingest():
             
             if not db_doc:
                 # Insert and return ID directly
+                file_path = os.path.join(os.path.dirname(BASE_DIR), "documents", file)
                 cur.execute(
                     "INSERT INTO documents (filename, file_path, file_size) VALUES (%s, %s, %s) RETURNING id",
-                    (file, path, file_size)
+                    (file, file_path, file_size)
                 )
                 doc_id = cur.fetchone()[0]
                 conn.commit()

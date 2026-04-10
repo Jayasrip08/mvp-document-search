@@ -54,8 +54,15 @@ function Upload({ setResults, setCount }) {
       }
 
       const data = await res.json();
-      setResults(data.results ?? []);
-      setCount(data.count ?? 0);
+
+      console.log("API RESPONSE:", data); // 🔍 Debug
+
+      // ✅ FIX: handle both array and object response
+      const resultData = Array.isArray(data) ? data : data.results || [];
+
+      setResults(resultData);
+      setCount(resultData.length);
+
     } catch (err) {
       if (err.name === "TypeError" && err.message.includes("fetch")) {
         setError("Cannot reach the backend server. Make sure it is running on http://127.0.0.1:8000.");
@@ -83,7 +90,6 @@ function Upload({ setResults, setCount }) {
       >
         <input
           ref={inputRef}
-          id="pdf-file-input"
           type="file"
           accept=".pdf,application/pdf"
           className="hidden-input"
@@ -96,52 +102,48 @@ function Upload({ setResults, setCount }) {
         </div>
         <div className="drop-zone-sub">
           {file ? (
-            <span style={{ color: "var(--accent-teal)" }}>File selected — click to change</span>
+            <span style={{ color: "var(--accent-teal)" }}>
+              File selected — click to change
+            </span>
           ) : (
             <>or <span>browse to upload</span> · PDF only</>
           )}
         </div>
       </div>
 
-      {/* Selected file badge */}
+      {/* Selected file */}
       {file && !isLoading && (
         <div className="file-badge">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
-          </svg>
-          {file.name}
-          <span style={{ opacity: 0.6, fontWeight: 400, marginLeft: 4 }}>
+          📄 {file.name}
+          <span style={{ opacity: 0.6, marginLeft: 6 }}>
             ({(file.size / 1024).toFixed(1)} KB)
           </span>
         </div>
       )}
 
-      {/* Spinner */}
+      {/* Loading */}
       {isLoading && (
         <div className="spinner-wrapper">
-          <div className="spinner" role="status" aria-label="Searching" />
-          <span className="spinner-text">Analyzing document &amp; searching</span>
+          <div className="spinner" />
+          <span>Searching...</span>
         </div>
       )}
 
-      {/* Error banner */}
+      {/* Error */}
       {error && (
-        <div className="error-banner" role="alert">
-          <span className="error-banner-icon">⚠️</span>
-          <span>{error}</span>
+        <div className="error-banner">
+          ⚠️ {error}
         </div>
       )}
 
-      {/* Search button */}
+      {/* Button */}
       {!isLoading && (
         <button
-          id="search-btn"
           className="btn-search"
           onClick={handleUpload}
           disabled={!file}
-          aria-label="Upload and search for similar documents"
         >
-          🔍 &nbsp;Upload &amp; Search Similar Documents
+          🔍 Upload & Search Similar Documents
         </button>
       )}
     </div>
