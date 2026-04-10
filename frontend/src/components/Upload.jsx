@@ -1,10 +1,10 @@
 import { useState, useRef, useCallback } from "react";
 
 function Upload({ setResults, setCount }) {
-  const [file,      setFile]      = useState(null);
+  const [file, setFile] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [error,     setError]     = useState(null);
-  const [dragOver,  setDragOver]  = useState(false);
+  const [error, setError] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef(null);
 
   /* ── file selection ── */
@@ -19,9 +19,9 @@ function Upload({ setResults, setCount }) {
   };
 
   /* ── drag-and-drop ── */
-  const onDragOver  = useCallback((e) => { e.preventDefault(); setDragOver(true);  }, []);
+  const onDragOver = useCallback((e) => { e.preventDefault(); setDragOver(true); }, []);
   const onDragLeave = useCallback((e) => { e.preventDefault(); setDragOver(false); }, []);
-  const onDrop      = useCallback((e) => {
+  const onDrop = useCallback((e) => {
     e.preventDefault();
     setDragOver(false);
     pickFile(e.dataTransfer.files[0]);
@@ -50,8 +50,15 @@ function Upload({ setResults, setCount }) {
       }
 
       const data = await res.json();
-      setResults(data.results ?? []);
-      setCount(data.count ?? 0);
+
+      console.log("API RESPONSE:", data); // 🔍 Debug
+
+      // ✅ FIX: handle both array and object response
+      const resultData = Array.isArray(data) ? data : data.results || [];
+
+      setResults(resultData);
+      setCount(resultData.length);
+
     } catch (err) {
       if (err.name === "TypeError" && err.message.includes("fetch")) {
         setError("Cannot reach the backend server. Make sure it is running on http://127.0.0.1:8000.");
@@ -80,7 +87,6 @@ function Upload({ setResults, setCount }) {
       >
         <input
           ref={inputRef}
-          id="pdf-file-input"
           type="file"
           accept=".pdf,application/pdf"
           className="hidden-input"
@@ -121,39 +127,43 @@ function Upload({ setResults, setCount }) {
         </div>
       )}
 
-      {/* ── Spinner ── */}
-      {isLoading && (
+    {/* ── Spinner ── */ }
+    {
+      isLoading && (
         <div className="spinner-wrapper">
           <div className="spinner-ring" role="status" aria-label="Searching" />
           <span className="spinner-text">Analyzing &amp; searching</span>
         </div>
-      )}
+      )
+    }
 
-      {/* ── Error banner ── */}
-      {error && (
+    {/* ── Error banner ── */ }
+    {
+      error && (
         <div className="error-banner" role="alert">
           <span className="error-banner-icon">⚠️</span>
           <span className="error-banner-text">{error}</span>
         </div>
-      )}
+      )
+    }
 
-      {/* ── Search button ── */}
-      {!isLoading && (
+    {/* ── Search button ── */ }
+    {
+      !isLoading && (
         <button
-          id="search-btn"
           className="btn-search"
           onClick={handleUpload}
           disabled={!file}
-          aria-label="Upload and search for similar documents"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+            <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
           </svg>
           Upload &amp; Find Similar Documents
         </button>
-      )}
-    </div>
+      )
+    }
+    </div >
   );
-}
+  }
 
-export default Upload;
+  export default Upload;

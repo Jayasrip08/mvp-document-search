@@ -57,47 +57,52 @@ function App() {
 
       {/* ─── Main content ───────────────────────────── */}
       <div className="page-wrapper">
-        <div className="container">
+        <div className={`container ${results.length > 0 ? "has-results" : ""}`}>
+          
+          <div className="left-panel">
+            {/* Hero */}
+            <header className="app-header">
+              <div className="hero-badge">
+                <span>✦</span> AI-Powered Search
+              </div>
+              <h1>
+                Find Documents<br />
+                <span className="gradient-text">Semantically</span>
+              </h1>
+              <p>
+                Upload any PDF and instantly discover the most relevant documents
+                in your library using state-of-the-art semantic embeddings.
+              </p>
+              <div className="hero-stats">
+                <span className="stat-chip">
+                  <span className="stat-chip-dot" />
+                  Vector similarity search
+                </span>
+                <span className="stat-chip">
+                  <span className="stat-chip-dot" style={{ background: "var(--accent-purple)" }} />
+                  PDF extraction
+                </span>
+                <span className="stat-chip">
+                  <span className="stat-chip-dot" style={{ background: "var(--accent-teal)" }} />
+                  Instant results
+                </span>
+              </div>
+            </header>
 
-          {/* Hero */}
-          <header className="app-header">
-            <div className="hero-badge">
-              <span>✦</span> AI-Powered Search
-            </div>
-            <h1>
-              Find Documents<br />
-              <span className="gradient-text">Semantically</span>
-            </h1>
-            <p>
-              Upload any PDF and instantly discover the most relevant documents
-              in your library using state-of-the-art semantic embeddings.
-            </p>
-            <div className="hero-stats">
-              <span className="stat-chip">
-                <span className="stat-chip-dot" />
-                Vector similarity search
-              </span>
-              <span className="stat-chip">
-                <span className="stat-chip-dot" style={{ background: "var(--accent-purple)" }} />
-                PDF extraction
-              </span>
-              <span className="stat-chip">
-                <span className="stat-chip-dot" style={{ background: "var(--accent-teal)" }} />
-                Instant results
-              </span>
-            </div>
-          </header>
-
-          {/* Upload card */}
-          <div className="upload-section">
-            <div className="section-label">📁 Upload Document</div>
-            <div className="glass-card">
-              <Upload setResults={setResults} setCount={setCount} />
+            {/* Upload card */}
+            <div className="upload-section">
+              <div className="section-label">📁 Upload Document</div>
+              <div className="glass-card">
+                <Upload setResults={setResults} setCount={setCount} />
+              </div>
             </div>
           </div>
 
-          {/* Results */}
-          <Results results={results} count={count} />
+          <div className="right-panel">
+            {/* Results */}
+            <Results results={results} count={count} />
+          </div>
+
         </div>
       </div>
 

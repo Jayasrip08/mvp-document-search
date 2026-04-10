@@ -255,7 +255,24 @@ html.dark .theme-toggle-thumb {
 .container {
   max-width: 880px;
   margin: 0 auto;
+  transition: max-width 0.4s ease;
 }
+
+@media (min-width: 900px) {
+  .container.has-results {
+    max-width: 1100px;
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    gap: 48px;
+    align-items: start;
+  }
+  
+  .container.has-results .left-panel {
+    position: sticky;
+    top: 96px;
+  }
+}
+
 
 /* ─── Hero Header ───────────────────────────────── */
 .app-header {
@@ -640,6 +657,12 @@ html.dark .error-banner {
 .results-section {
   margin-top: 40px;
   animation: fadeSlideUp 0.5s ease both;
+}
+
+@media (min-width: 900px) {
+  .container.has-results .results-section {
+    margin-top: 0;
+  }
 }
 
 .results-header {
