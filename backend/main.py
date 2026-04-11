@@ -302,3 +302,23 @@ def get_document(filename: str):
     if os.path.exists(file_path):
         return FileResponse(file_path, filename=filename)
     return {"error": "File not found"}
+
+# ------------------ LIST DOCUMENTS API ------------------
+
+@app.get("/documents")
+async def get_documents():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT id, filename, file_size, upload_time FROM documents ORDER BY upload_time DESC")
+        docs = cur.fetchall()
+        cur.close()
+        conn.close()
+        # Ensure datetimes are serialized to strings
+        for doc in docs:
+            if doc['upload_time']:
+                doc['upload_time'] = doc['upload_time'].isoformat()
+        return docs
+    except Exception as e:
+        print(f"Error fetching documents list: {e}")
+        return []
