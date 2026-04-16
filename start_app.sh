@@ -7,9 +7,9 @@ PORT=${PORT:-8080}
 echo "[INIT] Configuring Nginx to listen on port $PORT..."
 sed -i "s/REPLACE_PORT/$PORT/g" /etc/nginx/sites-available/default
 
-# Start Nginx in the background
+# Start Nginx in the background with a writable PID path and error logging to stdout
 echo "[INIT] Starting Nginx..."
-/usr/sbin/nginx -g "daemon off;" &
+/usr/sbin/nginx -g "daemon off; pid /tmp/nginx.pid;" &
 
 # Start the FastAPI backend
 echo "[INIT] Starting FastAPI Backend on port 8000..."
