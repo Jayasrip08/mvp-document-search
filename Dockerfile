@@ -33,13 +33,13 @@ COPY .env ./
 COPY --from=frontend-build /app/frontend/dist /usr/share/nginx/html
 
 # Copy Nginx configuration
-COPY nginx_hf.conf /etc/nginx/sites-available/default
+COPY nginx_render.conf /etc/nginx/sites-available/default
 
 # Copy startup script
 COPY start_app.sh .
 RUN chmod +x start_app.sh
 
-# Hugging Face Spaces requirements:
+# Deployment requirements (Works for Render, Railway, and Hugging Face):
 # 1. Run as non-root user (UID 1000)
 # 2. Permissions for directories
 RUN useradd -m -u 1000 user && \
@@ -48,7 +48,7 @@ RUN useradd -m -u 1000 user && \
 
 USER user
 
-# Port 7860 is mandatory for Spaces
-EXPOSE 7860
+# Default port placeholder (Render provides $PORT at runtime)
+EXPOSE 8080
 
 CMD ["./start_app.sh"]

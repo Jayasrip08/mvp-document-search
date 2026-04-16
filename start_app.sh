@@ -1,7 +1,14 @@
 #!/bin/bash
 
+# Default port to 8080 if $PORT is not set (Render/Railway set this automatically)
+PORT=${PORT:-8080}
+
+# Replace the placeholder in the Nginx config with the actual port
+echo "[INIT] Configuring Nginx to listen on port $PORT..."
+sed -i "s/REPLACE_PORT/$PORT/g" /etc/nginx/sites-available/default
+
 # Start Nginx in the background
-echo "[INIT] Starting Nginx on port 7860..."
+echo "[INIT] Starting Nginx..."
 /usr/sbin/nginx -g "daemon off;" &
 
 # Start the FastAPI backend

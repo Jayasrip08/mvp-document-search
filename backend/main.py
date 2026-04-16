@@ -79,6 +79,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/healthz")
+async def health_check():
+    return {"status": "ok"}
+
 # ------------------ EMBEDDINGS + CHROMA (LAZY LOADED) ------------------
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
