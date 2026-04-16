@@ -21,3 +21,6 @@ frontend/.vite/
 # SQLite Databases
 *.sqlite3
 
+# Temp deployment files
+hf_deploy_tmp/
+

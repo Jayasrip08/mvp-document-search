@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
-# Explicitly load .env from the parent directory
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=True)
+# Load environment variables (from .env locally, or from environment in production)
+load_dotenv()
 
 from fastapi import FastAPI, UploadFile
 from fastapi.middleware.cors import CORSMiddleware

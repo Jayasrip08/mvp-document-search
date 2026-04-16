@@ -27,7 +27,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy Backend code
 COPY backend/main.py ./backend/
-COPY .env ./
 
 # Copy Frontend build to Nginx directory
 COPY --from=frontend-build /app/frontend/dist /usr/share/nginx/html
