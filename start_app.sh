@@ -1,13 +1,8 @@
 #!/bin/bash
 
-# Fix global Nginx config to allow running as non-root
-echo "[INIT] Fixing global Nginx configuration..."
-sed -i 's/^user/#user/' /etc/nginx/nginx.conf
-sed -i 's|pid /run/nginx.pid;|pid /tmp/nginx.pid;|g' /etc/nginx/nginx.conf
-
-# Replace the placeholder in the Nginx site config with the actual port
+# Replace the placeholder in the master Nginx config with the actual port
 echo "[INIT] Configuring Nginx to listen on port $PORT..."
-sed -i "s/REPLACE_PORT/$PORT/g" /etc/nginx/sites-available/default
+sed -i "s/REPLACE_PORT/$PORT/g" /etc/nginx/nginx.conf
 
 # Start Nginx in the background
 echo "[INIT] Starting Nginx..."

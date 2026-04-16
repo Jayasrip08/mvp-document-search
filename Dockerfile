@@ -32,7 +32,7 @@ COPY backend/main.py ./backend/
 COPY --from=frontend-build /app/frontend/dist /usr/share/nginx/html
 
 # Copy Nginx configuration
-COPY nginx_render.conf /etc/nginx/sites-available/default
+COPY nginx_full.conf /etc/nginx/nginx.conf
 
 # Copy startup script
 COPY start_app.sh .
