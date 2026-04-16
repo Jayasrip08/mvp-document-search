@@ -42,8 +42,8 @@ RUN chmod +x start_app.sh
 # 1. Run as non-root user (UID 1000)
 # 2. Permissions for directories
 RUN useradd -m -u 1000 user && \
-    mkdir -p /app/db /app/documents /var/log/nginx /var/lib/nginx /run/nginx && \
-    chown -R user:user /app /var/log/nginx /var/lib/nginx /run/nginx
+    mkdir -p /app/db /app/documents /var/log/nginx /var/lib/nginx /run/nginx /etc/nginx/sites-available && \
+    chown -R user:user /app /var/log/nginx /var/lib/nginx /run/nginx /etc/nginx
 
 USER user
 
