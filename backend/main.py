@@ -52,7 +52,17 @@ def init_db():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    # 3. Migration for existing tables
+    # 3. Feedback table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id SERIAL PRIMARY KEY,
+            query TEXT,
+            answer TEXT,
+            vote SMALLINT NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    # 4. Migration for existing tables
     try:
         cur.execute("ALTER TABLE search_history ADD COLUMN IF NOT EXISTS answer TEXT")
         cur.execute("ALTER TABLE search_history ADD COLUMN IF NOT EXISTS sources TEXT")
@@ -512,13 +522,29 @@ async def chat_stream(search: SearchQuery):
 
     citation_results = sorted(grouped.values(), key=lambda x: x["similarity"], reverse=True)
 
-    # 3. Build prompt
+    # 3. Build numbered source list for citations
+    source_list = "\n".join([
+        f"[{i+1}] {cr['file']} (Page {cr['matching_pages'][0] if cr['matching_pages'] else '?'})"
+        for i, cr in enumerate(citation_results)
+    ])
+
+    # 4. Build prompt with citation instructions
     if relevant_results:
-        context = "\n\n---\n\n".join([
-            f"[Source: {r.metadata.get('source', 'Unknown')}, Page {r.metadata.get('page', '?')}]\n{r.page_content}"
-            for r in relevant_results
-        ])
+        context_parts = []
+        for i, cr in enumerate(citation_results):
+            # Find matching chunk
+            for r, score in results_with_scores:
+                if r.metadata.get("source") == cr["file"] and r in relevant_results:
+                    context_parts.append(
+                        f"[{i+1}] Source: {cr['file']}, Page {r.metadata.get('page','?')}\n{r.page_content[:800]}"
+                    )
+                    break
+        context = "\n\n---\n\n".join(context_parts)
+
         prompt = f"""You are a contract and legal document assistant. Answer questions based on the document excerpts provided.
+
+AVAILABLE SOURCES:
+{source_list}
 
 DOCUMENT EXCERPTS:
 {context}
@@ -529,13 +555,10 @@ USER QUESTION: {search.query}
 
 INSTRUCTIONS:
 1. Answer using ONLY information from the DOCUMENT EXCERPTS above.
-2. If the exact phrase isn't used, look for equivalent legal meaning. For example:
-   - "terminate without cause" = "termination for convenience" = "either party may terminate with notice"
-   - "auto-renewal" = "automatically renews" = "successive terms"
-   - "liability cap" = "maximum liability" = "aggregate liability shall not exceed"
-3. Cite specific document names and page numbers when referencing content.
+2. Use inline citations like [1], [2] when referencing specific sources.
+3. If the exact phrase isn't used, look for equivalent legal meaning (e.g. "terminate without cause" = "termination for convenience").
 4. If truly no relevant information exists, say: "I could not find this information in the uploaded documents."
-5. Be concise, professional, and use markdown formatting (bullet points, bold for key terms).
+5. Be concise, professional, and use markdown formatting (bullet points, **bold** for key terms).
 
 Answer:"""
     else:
@@ -562,6 +585,25 @@ Answer:"""
 
         # Log to history after streaming completes
         log_to_history(query=search.query, answer=full_answer, sources=sources)
+
+        # Generate follow-up questions
+        try:
+            followup_prompt = f"""A user asked: "{search.query}"
+The assistant answered from legal/contract documents.
+Generate exactly 3 short, specific follow-up questions the user might ask next.
+Return ONLY a valid JSON array of 3 strings, e.g. ["Q1?", "Q2?", "Q3?"]
+No explanation, no markdown, just the JSON array."""
+            followup_response = await llm.ainvoke(followup_prompt)
+            raw = followup_response.content.strip()
+            # Extract JSON array robustly
+            import re as _re
+            match = _re.search(r'\[.*?\]', raw, _re.DOTALL)
+            if match:
+                followups = json.loads(match.group())
+                if isinstance(followups, list) and len(followups) > 0:
+                    yield f"event: followups\ndata: {json.dumps(followups[:3])}\n\n"
+        except Exception as e:
+            print(f"Follow-up generation error: {e}")
 
     return StreamingResponse(
         generate(),
@@ -771,3 +813,29 @@ async def get_documents():
     except Exception as e:
         print(f"Error fetching documents list: {e}")
         return []
+
+# ------------------ FEEDBACK API ------------------
+
+class FeedbackBody(BaseModel):
+    query: str
+    answer: str
+    vote: int   # 1 = thumbs up, -1 = thumbs down
+
+@app.post("/feedback")
+async def submit_feedback(body: FeedbackBody):
+    if body.vote not in (1, -1):
+        return {"status": "error", "message": "vote must be 1 or -1"}
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO feedback (query, answer, vote) VALUES (%s, %s, %s)",
+            (body.query, body.answer[:2000], body.vote)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"status": "success"}
+    except Exception as e:
+        print(f"Feedback error: {e}")
+        return {"status": "error", "message": str(e)}

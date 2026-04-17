@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import SearchBar from "./components/SearchBar";
 import Results from "./components/Results";
 import Sidebar from "./components/Sidebar";
+import DocumentDrawer from "./components/DocumentDrawer";
 import "./styles.css";
 
 /* ── Toast notification system ─────────────────── */
@@ -52,6 +53,7 @@ function App() {
   const { toasts, show: showToast } = useToast();
   const [messages, setMessages] = useState([]);
   const [lastQuery, setLastQuery] = useState("");
+  const [drawerItem, setDrawerItem] = useState(null);
   const [history, setHistory] = useState([]);
 
   const [dark,    setDark]    = useState(getInitialTheme);
@@ -234,7 +236,8 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
                   return updated;
                 });
                 fetchData();
-                break;
+                // Don't break — keep reading for followups event
+                continue;
               }
 
               try {
@@ -245,6 +248,15 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
                     const lastIdx = updated.length - 1;
                     if (updated[lastIdx]?.role === "assistant") {
                       updated[lastIdx] = { ...updated[lastIdx], results: parsed };
+                    }
+                    return updated;
+                  });
+                } else if (eventType === "followups" && Array.isArray(parsed)) {
+                  setMessages(prev => {
+                    const updated = [...prev];
+                    const lastIdx = updated.length - 1;
+                    if (updated[lastIdx]?.role === "assistant") {
+                      updated[lastIdx] = { ...updated[lastIdx], followups: parsed };
                     }
                     return updated;
                   });
@@ -349,16 +361,16 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
 
   return (
     <div className="app-main-wrapper">
-      <Sidebar 
-        isOpen={showSidebar} 
-        setIsOpen={setShowSidebar} 
-        history={history} 
+      <Sidebar
+        isOpen={showSidebar}
+        setIsOpen={setShowSidebar}
+        history={history}
         onHistoryClick={handleHistoryAction}
         onDeleteHistory={handleDeleteHistory}
         onRefresh={fetchData}
       />
 
-      <div className={`app-main-content ${showSidebar ? "sidebar-open" : ""}`}>
+      <div className={`app-main-content${drawerItem ? " drawer-open" : ""}`}>
         {!serverOnline && (
           <div style={{
             background: "linear-gradient(90deg, #f59e0b, #f97316)",
@@ -458,11 +470,13 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
               </div>
             ) : (
               <div className="chat-results-area">
-                <Results 
-                  messages={messages} 
-                  clearResults={clearResults} 
+                <Results
+                  messages={messages}
+                  clearResults={clearResults}
                   isSearching={isSearching}
                   query={lastQuery}
+                  onDocumentOpen={setDrawerItem}
+                  onFollowUp={performSearch}
                 />
                 <div ref={chatEndRef} />
               </div>
@@ -486,6 +500,12 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
         </div>
       </div>
       <ToastContainer toasts={toasts} />
+
+      <DocumentDrawer
+        item={drawerItem}
+        query={lastQuery}
+        onClose={() => setDrawerItem(null)}
+      />
     </div>
   );
 }

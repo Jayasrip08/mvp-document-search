@@ -1,6 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
+
+const API_URL = import.meta.env.VITE_API_URL || "/api";
 
 /* ── helpers ─────────────────────────────────────── */
 function getBadgeClass(score) {
@@ -20,7 +22,6 @@ const STOP_WORDS = new Set([
   "off","down","use","used","also","such","other","these","those","shall",
 ]);
 
-/* Injects <mark> tags into raw markdown text so ReactMarkdown renders highlights */
 function markKeywords(markdown, query) {
   if (!query || !markdown) return markdown || "";
   const keywords = query.split(/\s+/)
@@ -32,19 +33,22 @@ function markKeywords(markdown, query) {
   return markdown.replace(regex, "<mark>$1</mark>");
 }
 
+/* Replace [N] (not followed by () with clickable citation superscript */
+function renderCitations(text) {
+  return text.replace(/\[(\d+)\](?!\()/g, (_, n) =>
+    `<sup class="cite-badge" data-idx="${n}">[${n}]</sup>`
+  );
+}
+
 function highlightText(text, query) {
   if (!query || !text) return text;
-
   const keywords = query.split(/\s+/)
     .map(w => w.replace(/[^a-zA-Z0-9]/g, "").toLowerCase())
     .filter(w => w.length >= 4 && !STOP_WORDS.has(w))
     .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-
   if (keywords.length === 0) return text;
-
   const regex = new RegExp(`(${keywords.join("|")})`, "gi");
   const parts = text.split(regex);
-
   return (
     <span>
       {parts.map((part, i) => {
@@ -55,177 +59,31 @@ function highlightText(text, query) {
   );
 }
 
-/* ── Full-document Viewer Modal ─────────────────── */
-function DocumentModal({ item, onClose, query }) {
-  const [matchIndex, setMatchIndex] = useState(0);
-  const [clauseCopied, setClauseCopied] = useState(false);
-  const [allPages, setAllPages] = useState(item.matching_pages || []);
-  const [loadingPages, setLoadingPages] = useState(true);
-  const badgeClass = getBadgeClass(item.similarity);
-
-  const API_URL = import.meta.env.VITE_API_URL || "/api";
-
-  useEffect(() => {
-    if (!query || !item.file) { setLoadingPages(false); return; }
-    const encoded = encodeURIComponent(item.file);
-    const q = encodeURIComponent(query);
-    fetch(`${API_URL}/document-pages/${encoded}?query=${q}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.pages && data.pages.length > 0) {
-          setAllPages(data.pages.map(p => p.page));
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoadingPages(false));
-  }, [item.file, query]);
-
-  const totalMatches = allPages.length || 0;
-  const currentPage = allPages[matchIndex] || 1;
-
-  const searchTerms = (query || "")
-    .split(/\s+/)
-    .map(w => w.replace(/[^a-zA-Z0-9]/g, "").toLowerCase())
-    .filter(w => w.length >= 4 && !STOP_WORDS.has(w))
-    .slice(0, 3)
-    .join(" ");
-  const pdfUrl = `${API_URL}/document/${item.file}?v=${Date.now()}#page=${currentPage}${searchTerms ? `&search=${encodeURIComponent(searchTerms)}` : ""}`;
-
-  const nextMatch = () => setMatchIndex(prev => (prev + 1) % totalMatches);
-  const prevMatch = () => setMatchIndex(prev => (prev - 1 + totalMatches) % totalMatches);
-
-  useEffect(() => {
-    const handleKey = (e) => {
-      if (e.key === "Escape") onClose();
-      if (e.key === "ArrowRight" && totalMatches > 1) nextMatch();
-      if (e.key === "ArrowLeft" && totalMatches > 1) prevMatch();
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [matchIndex, totalMatches]);
-
-  const handleCopyClause = () => {
-    const text = item.full_text || item.text || "";
-    navigator.clipboard.writeText(`[${item.file} — Page ${currentPage}]\n\n${text}`);
-    setClauseCopied(true);
-    setTimeout(() => setClauseCopied(false), 2000);
-  };
-
-  const handleOverlayClick = (e) => {
-    if (e.target === e.currentTarget) onClose();
-  };
-
+/* ── Score Tooltip Badge ─────────────────────────── */
+function ScoreBadge({ score, badgeClass, label }) {
   return (
-    <div className="modal-overlay" onClick={handleOverlayClick} role="dialog" aria-modal="true">
-      <div className="modal-box">
-        <div className="modal-header">
-          <div className="modal-title-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-            </svg>
-          </div>
-          <div className="modal-title">
-            <span className="modal-title-text">{item.file}</span>
-          </div>
-          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexShrink: 0 }}>
-            <span className={`match-badge ${badgeClass}`}>
-              {item.similarity}% match
-            </span>
-            <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
-          </div>
-        </div>
-
-        <div className="modal-split-content">
-          <div className="pdf-side">
-            <iframe
-              src={pdfUrl}
-              className="pdf-iframe"
-              title="PDF Viewer"
-              key={`${item.file}-${currentPage}`}
-            />
-          </div>
-
-          <div className="text-side">
-            <div className="match-navigator-bar">
-              <div>
-                {loadingPages ? (
-                  <div className="match-nav-label" style={{ opacity: 0.6 }}>Finding matching pages…</div>
-                ) : (
-                  <>
-                    <div className="match-nav-label">Page {matchIndex + 1} of {totalMatches}</div>
-                    {totalMatches > 1 && (
-                      <div className="match-nav-hint">← → keys to navigate</div>
-                    )}
-                  </>
-                )}
-              </div>
-              <div className="match-nav-btns">
-                <button className="btn-nav" onClick={prevMatch} disabled={totalMatches <= 1 || loadingPages}>← Prev</button>
-                <button className="btn-nav" onClick={nextMatch} disabled={totalMatches <= 1 || loadingPages}>Next →</button>
-              </div>
-            </div>
-
-            <div style={{ padding: "20px 20px", flex: 1, overflowY: "auto" }}>
-              <div className="modal-text-label">Extracted Context — Page {currentPage}</div>
-              <div className="modal-text-body">
-                {highlightText(item.full_text || item.text || "No text content available.", query)}
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button
-                onClick={handleCopyClause}
-                className="btn-download"
-                style={{
-                  background: clauseCopied ? "var(--green-bg)" : undefined,
-                  borderColor: clauseCopied ? "var(--green)" : undefined,
-                  color: clauseCopied ? "var(--green)" : undefined,
-                }}
-              >
-                {clauseCopied ? (
-                  <>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                    Copied!
-                  </>
-                ) : (
-                  <>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <rect x="9" y="9" width="13" height="13" rx="2"/>
-                      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                    </svg>
-                    Copy Clause
-                  </>
-                )}
-              </button>
-              <a
-                href={`${API_URL}/document/${item.file}`}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-download"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                Download
-              </a>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <span className={`tooltip-wrapper`}>
+      <span className={`source-score-badge ${badgeClass}`}>{score}%</span>
+      <span className="tooltip-popup">
+        <strong>Semantic similarity: {score}%</strong><br />
+        Measures how closely this passage matches your query using AI vector embeddings.
+        {score >= 75 ? " Strong match." : score >= 50 ? " Moderate match." : " Weak match."}
+      </span>
+    </span>
   );
 }
 
 /* ── Source Card ─────────────────────────────────── */
-function SourceCard({ item, onExpand, query }) {
+function SourceCard({ item, idx, onExpand, onCompare, compareItems, query }) {
   const badgeClass = getBadgeClass(item.similarity);
+  const isInCompare = compareItems.some(c => c.file === item.file);
+
   return (
-    <div className="source-card" onClick={() => onExpand(item)} title="Click to open document">
+    <div
+      className={`source-card${isInCompare ? " compare-selected" : ""}`}
+      onClick={() => onExpand(item)}
+      title="Click to open document"
+    >
       <div className="source-card-top">
         <div className="source-card-icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -234,18 +92,42 @@ function SourceCard({ item, onExpand, query }) {
           </svg>
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="source-card-name">{item.file}</div>
-          {item.page && (
-            <div className="source-card-pages">Page {item.page}</div>
+          {idx !== undefined && (
+            <span className="source-card-num">[{idx + 1}]</span>
           )}
+          <div className="source-card-name">{item.file}</div>
+          {item.page && <div className="source-card-pages">Page {item.page}</div>}
         </div>
-        <span className={`source-score-badge ${badgeClass}`}>{item.similarity}%</span>
+        <ScoreBadge score={item.similarity} badgeClass={badgeClass} />
       </div>
+
       {item.text && (
         <div className="source-snippet">
           {highlightText(item.text, query)}
         </div>
       )}
+
+      {/* Compare button */}
+      <button
+        className={`source-compare-btn${isInCompare ? " active" : ""}`}
+        onClick={e => { e.stopPropagation(); onCompare(item); }}
+        title={isInCompare ? "Remove from comparison" : "Add to comparison"}
+      >
+        {isInCompare ? (
+          <>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Added
+          </>
+        ) : (
+          <>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <rect x="3" y="3" width="8" height="18" rx="1"/>
+              <rect x="13" y="3" width="8" height="18" rx="1"/>
+            </svg>
+            Compare
+          </>
+        )}
+      </button>
     </div>
   );
 }
@@ -266,9 +148,7 @@ function CopyButton({ text }) {
     >
       {copied ? (
         <>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
           Copied
         </>
       ) : (
@@ -284,13 +164,80 @@ function CopyButton({ text }) {
   );
 }
 
+/* ── Thumbs Feedback ─────────────────────────────── */
+function FeedbackButtons({ query, answer }) {
+  const [voted, setVoted] = useState(null); // 1 or -1
+
+  const handleVote = async (vote) => {
+    if (voted !== null) return;
+    setVoted(vote);
+    try {
+      await fetch(`${API_URL}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, answer, vote }),
+      });
+    } catch (_) {}
+  };
+
+  return (
+    <div className="feedback-btns">
+      <button
+        className={`msg-action-btn${voted === 1 ? " voted-up" : ""}`}
+        onClick={() => handleVote(1)}
+        disabled={voted !== null}
+        title="Helpful"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill={voted === 1 ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+          <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
+          <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+        </svg>
+      </button>
+      <button
+        className={`msg-action-btn${voted === -1 ? " voted-down" : ""}`}
+        onClick={() => handleVote(-1)}
+        disabled={voted !== null}
+        title="Not helpful"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill={voted === -1 ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+          <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+          <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+        </svg>
+      </button>
+      {voted !== null && (
+        <span className="feedback-thanks">Thanks!</span>
+      )}
+    </div>
+  );
+}
+
 /* ── Message Row ─────────────────────────────────── */
-function MessageRow({ msg, onExpand, query }) {
+function MessageRow({ msg, onExpand, onCompare, compareItems, query, onFollowUp }) {
   const isUser = msg.role === "user";
+  const bodyRef = useRef(null);
+
+  /* Handle citation badge clicks via event delegation */
+  useEffect(() => {
+    if (!bodyRef.current || !msg.results) return;
+    const handler = (e) => {
+      const badge = e.target.closest(".cite-badge");
+      if (!badge) return;
+      const idx = parseInt(badge.dataset.idx, 10) - 1;
+      if (!isNaN(idx) && msg.results[idx]) {
+        onExpand(msg.results[idx]);
+      }
+    };
+    const el = bodyRef.current;
+    el.addEventListener("click", handler);
+    return () => el.removeEventListener("click", handler);
+  }, [msg.results, onExpand]);
+
+  const processedContent = renderCitations(
+    markKeywords(msg.content || "", query)
+  );
 
   return (
     <div className={`message-row${isUser ? " user" : ""}`}>
-      {/* Avatar */}
       <div className={`msg-avatar${isUser ? " user" : " ai"}`}>
         {isUser ? (
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -304,50 +251,70 @@ function MessageRow({ msg, onExpand, query }) {
         )}
       </div>
 
-      {/* Body */}
       <div className="msg-body">
         {isUser ? (
           <div className="user-bubble">{msg.content}</div>
         ) : (
           <>
             {msg.loading ? (
-              <div className="ai-typing-dots">
-                <span /><span /><span />
-              </div>
+              <div className="ai-typing-dots"><span /><span /><span /></div>
             ) : (
               <>
-                <div className="ai-text-content">
+                <div className="ai-text-content" ref={bodyRef}>
                   {msg.streaming ? (
                     <>
-                      <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                        {markKeywords(msg.content || "", query)}
-                      </ReactMarkdown>
+                      <ReactMarkdown rehypePlugins={[rehypeRaw]}>{processedContent}</ReactMarkdown>
                       <span className="streaming-cursor" />
                     </>
                   ) : (
-                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                      {markKeywords(msg.content || "", query)}
-                    </ReactMarkdown>
+                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>{processedContent}</ReactMarkdown>
                   )}
                 </div>
 
-                {/* Action bar + Sources — only shown AFTER streaming finishes */}
+                {/* Action bar + Sources + Follow-ups — only after streaming */}
                 {!msg.streaming && (
                   <>
                     {msg.content && (
                       <div className="msg-actions">
                         <CopyButton text={msg.content} />
+                        <FeedbackButtons query={query} answer={msg.content} />
                       </div>
                     )}
 
                     {msg.results && msg.results.length > 0 && (
                       <div className="sources-section">
-                        <div className="sources-label">
-                          Sources &amp; References
-                        </div>
+                        <div className="sources-label">Sources &amp; References</div>
                         <div className="sources-row">
                           {msg.results.slice(0, 6).map((res, i) => (
-                            <SourceCard key={i} item={res} onExpand={onExpand} query={query} />
+                            <SourceCard
+                              key={i}
+                              item={res}
+                              idx={i}
+                              onExpand={onExpand}
+                              onCompare={onCompare}
+                              compareItems={compareItems}
+                              query={query}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {msg.followups && msg.followups.length > 0 && (
+                      <div className="followup-section">
+                        <div className="followup-label">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                          </svg>
+                          Follow-up questions
+                        </div>
+                        <div className="followup-chips">
+                          {msg.followups.map((q, i) => (
+                            <button key={i} className="followup-chip" onClick={() => onFollowUp(q)}>
+                              {q}
+                            </button>
                           ))}
                         </div>
                       </div>
@@ -358,6 +325,104 @@ function MessageRow({ msg, onExpand, query }) {
             )}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Comparison Overlay ──────────────────────────── */
+import { diffWords } from "diff";
+
+function ComparisonOverlay({ items, onClose, query }) {
+  const [isVisible, setIsVisible] = useState(false);
+  useEffect(() => {
+    if (items.length === 2) requestAnimationFrame(() => setIsVisible(true));
+    else setIsVisible(false);
+  }, [items.length]);
+
+  useEffect(() => {
+    if (items.length < 2) return;
+    const onKey = (e) => { if (e.key === "Escape") handleClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [items.length]);
+
+  const handleClose = () => {
+    setIsVisible(false);
+    setTimeout(onClose, 260);
+  };
+
+  if (items.length < 2) return null;
+
+  const [a, b] = items;
+  const textA = a.full_text || a.text || "";
+  const textB = b.full_text || b.text || "";
+  const diffs = diffWords(textA, textB);
+
+  const renderDiff = (side) =>
+    diffs.map((part, i) => {
+      if (side === "left"  && part.removed) return <mark key={i} className="diff-removed">{part.value}</mark>;
+      if (side === "right" && part.added)   return <mark key={i} className="diff-added">{part.value}</mark>;
+      if (part.added   && side === "left")  return null;
+      if (part.removed && side === "right") return null;
+      return <span key={i}>{part.value}</span>;
+    });
+
+  return (
+    <div className={`comparison-overlay${isVisible ? " open" : ""}`}>
+      {/* ── Top bar ── */}
+      <div className="comparison-header">
+        <div className="comparison-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <rect x="3" y="3" width="8" height="18" rx="1"/>
+            <rect x="13" y="3" width="8" height="18" rx="1"/>
+          </svg>
+          Document Comparison
+        </div>
+
+        <div className="comparison-legend">
+          <span className="legend-pill legend-removed">
+            <span className="legend-dot" />
+            Unique to left
+          </span>
+          <span className="legend-pill legend-added">
+            <span className="legend-dot" />
+            Unique to right
+          </span>
+        </div>
+
+        <button className="comparison-close" onClick={handleClose} title="Close (Esc)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      {/* ── Side-by-side panels ── */}
+      <div className="comparison-panels">
+        {[a, b].map((item, side) => (
+          <div key={side} className="comparison-panel">
+            <div className="comparison-panel-header">
+              <div className={`comparison-panel-badge`}>
+                {side === 0 ? "A" : "B"}
+              </div>
+              <div className="comparison-panel-meta">
+                <div className="comparison-panel-name" title={item.file}>{item.file}</div>
+                <div className="comparison-panel-sub">
+                  {item.matching_pages?.length > 0
+                    ? `Pages: ${item.matching_pages.slice(0,3).join(", ")}${item.matching_pages.length > 3 ? "…" : ""}`
+                    : ""}
+                </div>
+              </div>
+              <span className={`source-score-badge ${getBadgeClass(item.similarity)}`}>
+                {item.similarity}% match
+              </span>
+            </div>
+            <div className="comparison-panel-body">
+              {renderDiff(side === 0 ? "left" : "right")}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -390,11 +455,19 @@ function exportToCSV(messages, query) {
 }
 
 /* ── Results ─────────────────────────────────────── */
-function Results({ messages, isSearching, query }) {
-  const [modalItem, setModalItem] = useState(null);
+function Results({ messages, isSearching, query, onDocumentOpen, onFollowUp }) {
+  const [compareItems, setCompareItems] = useState([]);
+
+  const handleCompare = useCallback((item) => {
+    setCompareItems(prev => {
+      const already = prev.some(c => c.file === item.file);
+      if (already) return prev.filter(c => c.file !== item.file);
+      if (prev.length >= 2) return [prev[1], item]; // replace oldest
+      return [...prev, item];
+    });
+  }, []);
 
   if (!messages || messages.length === 0) return null;
-
   const hasResults = messages.some(m => m.results && m.results.length > 0);
 
   return (
@@ -418,16 +491,32 @@ function Results({ messages, isSearching, query }) {
             <MessageRow
               key={i}
               msg={msg}
-              onExpand={setModalItem}
+              onExpand={onDocumentOpen}
+              onCompare={handleCompare}
+              compareItems={compareItems}
               query={query}
+              onFollowUp={onFollowUp}
             />
           ))}
         </div>
       </div>
 
-      {modalItem && (
-        <DocumentModal item={modalItem} onClose={() => setModalItem(null)} query={query} />
+      {/* Compare toast hint */}
+      {compareItems.length === 1 && (
+        <div className="compare-hint-bar">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <rect x="3" y="3" width="8" height="18" rx="1"/><rect x="13" y="3" width="8" height="18" rx="1"/>
+          </svg>
+          Select one more source to compare
+          <button className="compare-hint-cancel" onClick={() => setCompareItems([])}>✕</button>
+        </div>
       )}
+
+      <ComparisonOverlay
+        items={compareItems}
+        onClose={() => setCompareItems([])}
+        query={query}
+      />
     </>
   );
 }
