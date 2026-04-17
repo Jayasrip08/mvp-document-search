@@ -1,6 +1,12 @@
 # Python
 __pycache__/
 *.pyc
+venv/
+*.egg-info/
+
+# Temp / scratch
+scratch/
+temp-repo/
 
 # Env files
 .env
@@ -20,7 +26,4 @@ frontend/.vite/
 
 # SQLite Databases
 *.sqlite3
-
-# Temp deployment files
-hf_deploy_tmp/
 

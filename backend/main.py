@@ -1,14 +1,15 @@
 import os
 from dotenv import load_dotenv
-# Load environment variables (from .env locally, or from environment in production)
-load_dotenv()
+# Explicitly load .env from the parent directory
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=True)
 
 from fastapi import FastAPI, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from fastapi.responses import FileResponse, StreamingResponse
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 import fitz
 import os
@@ -77,10 +78,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.get("/healthz")
-async def health_check():
-    return {"status": "ok"}
 
 # ------------------ EMBEDDINGS + CHROMA (LAZY LOADED) ------------------
 
@@ -169,8 +166,8 @@ async def async_load_documents():
         # Load Embeddings & Chroma in a thread to prevent blocking
         def load_models():
             global embeddings, db
-            print("[INIT] Connecting to OpenAI Embeddings API...")
-            embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+            print("[INIT] Loading HuggingFace Embeddings Model...")
+            embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
             print("[INIT] Connecting to ChromaDB...")
             db = Chroma(
                 persist_directory=CHROMA_PATH,
@@ -382,16 +379,25 @@ async def chat_with_docs(search: SearchQuery):
     if not db:
         return {"answer": "I'm still loading my knowledge base. Please try again in a few moments.", "sources": []}
 
-    # 1. Retrieve relevant context from vector DB
-    results = db.similarity_search(search.query, k=6)
-    sources = list(set([r.metadata.get("source") for r in results]))
+    # 1. Retrieve more chunks (k=12) and filter out very low similarity results
+    results_with_scores = db.similarity_search_with_score(search.query, k=12)
 
-    if results:
+    # Filter: keep only chunks with cosine similarity > 15% (score < 0.85)
+    # Cosine distance: 0 = identical, 1 = orthogonal, 2 = opposite
+    relevant_results = [r for r, score in results_with_scores if score < 0.85]
+
+    # Fall back to top 4 if nothing passes the threshold
+    if not relevant_results:
+        relevant_results = [r for r, _ in results_with_scores[:4]]
+
+    sources = list(set([r.metadata.get("source") for r in relevant_results]))
+
+    if relevant_results:
         context = "\n\n---\n\n".join([
             f"[Source: {r.metadata.get('source', 'Unknown')}, Page {r.metadata.get('page', '?')}]\n{r.page_content}"
-            for r in results
+            for r in relevant_results
         ])
-        prompt = f"""You are a strict Document Assistant. Your primary goal is to provide answers based ONLY on the document excerpts provided below.
+        prompt = f"""You are a contract and legal document assistant. Answer questions based on the document excerpts provided.
 
 DOCUMENT EXCERPTS:
 {context}
@@ -400,37 +406,168 @@ DOCUMENT EXCERPTS:
 
 USER QUESTION: {search.query}
 
-STRICT INSTRUCTIONS:
-1. Answer the question using ONLY the information found in the DOCUMENT EXCERPTS above.
-2. If the answer is not contained within the excerpts, explicitly state: "I'm sorry, but I could not find information regarding this in the uploaded documents." Do NOT use your general knowledge to answer.
-3. Be professional and cite the specific document/page when possible.
-4. If the question is greeting or not a query (e.g., "Hello"), you may respond politely but remind the user you are here to help with their documents.
+INSTRUCTIONS:
+1. Answer using ONLY information from the DOCUMENT EXCERPTS above.
+2. If the exact phrase isn't used, look for equivalent legal meaning. For example:
+   - "terminate without cause" = "termination for convenience" = "either party may terminate with notice"
+   - "auto-renewal" = "automatically renews" = "successive terms"
+   - "liability cap" = "maximum liability" = "aggregate liability shall not exceed"
+3. When answering, cite the specific document name and page number.
+4. If truly no relevant information exists in any excerpt, say: "I could not find this information in the uploaded documents."
+5. Be concise and professional.
 
 Answer:"""
     else:
-        # No relevant documents found
-        prompt = f"""You are a Document Assistant. The user's document library does not contain any relevant content for this query.
+        prompt = f"""You are a Document Assistant. The user's document library does not contain relevant content for this query.
 
 User's Question: {search.query}
 
-Response: State clearly that no relevant information was found in the uploaded documents. Do NOT provide an answer from your general knowledge.
+State clearly that no relevant information was found. Do NOT use general knowledge.
 
 Answer:"""
 
     try:
         response = llm.invoke(prompt)
         answer_text = response.content.strip()
-        
+
+        # Build citation cards from the exact chunks used to generate the answer
+        score_map = {id(r): score for r, score in results_with_scores}
+        grouped = {}
+        for r, score in results_with_scores:
+            if r not in relevant_results:
+                continue
+            similarity = round(max(0.0, (1 - score) * 100), 2)
+            fname = r.metadata.get("source", "Unknown")
+            page  = r.metadata.get("page", 1)
+            if fname not in grouped:
+                grouped[fname] = {
+                    "file": fname,
+                    "similarity": similarity,
+                    "text": r.page_content[:200],
+                    "full_text": r.page_content[:3000],
+                    "matching_pages": [page],
+                }
+            else:
+                if page not in grouped[fname]["matching_pages"]:
+                    grouped[fname]["matching_pages"].append(page)
+                if similarity > grouped[fname]["similarity"]:
+                    grouped[fname]["similarity"] = similarity
+                    grouped[fname]["text"] = r.page_content[:200]
+                    grouped[fname]["full_text"] = r.page_content[:3000]
+
+        citation_results = sorted(grouped.values(), key=lambda x: x["similarity"], reverse=True)
+
         # Log to history
         log_to_history(query=search.query, answer=answer_text, sources=sources)
 
         return {
             "answer": answer_text,
-            "sources": sources
+            "sources": sources,
+            "results": citation_results,
         }
     except Exception as e:
         print(f"Chat error: {e}")
         return {"error": str(e), "answer": f"Failed to generate answer: {str(e)}"}
+
+# ------------------ STREAMING CHAT API ------------------
+
+@app.post("/chat-stream")
+async def chat_stream(search: SearchQuery):
+    if not db:
+        async def error_gen():
+            yield "data: \"I'm still loading my knowledge base. Please wait a moment.\"\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(error_gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    # 1. Retrieve and filter relevant chunks
+    results_with_scores = db.similarity_search_with_score(search.query, k=12)
+    relevant_results = [r for r, score in results_with_scores if score < 0.85]
+    if not relevant_results:
+        relevant_results = [r for r, _ in results_with_scores[:4]]
+
+    sources = list(set([r.metadata.get("source") for r in relevant_results]))
+
+    # 2. Build citation cards
+    grouped = {}
+    for r, score in results_with_scores:
+        if r not in relevant_results:
+            continue
+        similarity = round(max(0.0, (1 - score) * 100), 2)
+        fname = r.metadata.get("source", "Unknown")
+        page  = r.metadata.get("page", 1)
+        if fname not in grouped:
+            grouped[fname] = {
+                "file": fname, "similarity": similarity,
+                "text": r.page_content[:200], "full_text": r.page_content[:3000],
+                "matching_pages": [page],
+            }
+        else:
+            if page not in grouped[fname]["matching_pages"]:
+                grouped[fname]["matching_pages"].append(page)
+            if similarity > grouped[fname]["similarity"]:
+                grouped[fname]["similarity"] = similarity
+                grouped[fname]["text"] = r.page_content[:200]
+                grouped[fname]["full_text"] = r.page_content[:3000]
+
+    citation_results = sorted(grouped.values(), key=lambda x: x["similarity"], reverse=True)
+
+    # 3. Build prompt
+    if relevant_results:
+        context = "\n\n---\n\n".join([
+            f"[Source: {r.metadata.get('source', 'Unknown')}, Page {r.metadata.get('page', '?')}]\n{r.page_content}"
+            for r in relevant_results
+        ])
+        prompt = f"""You are a contract and legal document assistant. Answer questions based on the document excerpts provided.
+
+DOCUMENT EXCERPTS:
+{context}
+
+---
+
+USER QUESTION: {search.query}
+
+INSTRUCTIONS:
+1. Answer using ONLY information from the DOCUMENT EXCERPTS above.
+2. If the exact phrase isn't used, look for equivalent legal meaning. For example:
+   - "terminate without cause" = "termination for convenience" = "either party may terminate with notice"
+   - "auto-renewal" = "automatically renews" = "successive terms"
+   - "liability cap" = "maximum liability" = "aggregate liability shall not exceed"
+3. Cite specific document names and page numbers when referencing content.
+4. If truly no relevant information exists, say: "I could not find this information in the uploaded documents."
+5. Be concise, professional, and use markdown formatting (bullet points, bold for key terms).
+
+Answer:"""
+    else:
+        prompt = f"""You are a Document Assistant. The user's document library does not contain relevant content for this query.
+User's Question: {search.query}
+State clearly that no relevant information was found. Do NOT use general knowledge.
+Answer:"""
+
+    async def generate():
+        # Send citation cards first
+        yield f"event: sources\ndata: {json.dumps(citation_results)}\n\n"
+
+        full_answer = ""
+        try:
+            async for chunk in llm.astream(prompt):
+                token = chunk.content
+                if token:
+                    full_answer += token
+                    yield f"data: {json.dumps(token)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps(f'Error generating response: {str(e)}')}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+        # Log to history after streaming completes
+        log_to_history(query=search.query, answer=full_answer, sources=sources)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 # ------------------ SUMMARIZE API ------------------
 
@@ -557,6 +694,50 @@ async def get_stats():
     except Exception as e:
         print(f"Error fetching stats: {e}")
         return {"document_count": 0, "error": str(e)}
+
+# ------------------ DOCUMENT PAGE SEARCH ------------------
+
+@app.get("/document-pages/{filename}")
+async def get_document_pages(filename: str, query: str = ""):
+    """Search within a specific document to find ALL pages matching the query."""
+    if not db:
+        return {"pages": []}
+    try:
+        import urllib.parse
+        filename = urllib.parse.unquote(filename)
+
+        if not query:
+            return {"pages": []}
+
+        # Broad search then filter client-side to this document (avoids Chroma filter syntax issues)
+        results = db.similarity_search_with_score(query, k=100)
+
+        seen_pages = {}
+        for r, score in results:
+            src = r.metadata.get("source", "")
+            if src != filename:
+                continue
+            page = r.metadata.get("page", 1)
+            similarity = round(max(0.0, (1 - score) * 100), 2)
+            if page not in seen_pages or similarity > seen_pages[page]["similarity"]:
+                seen_pages[page] = {
+                    "page": page,
+                    "similarity": similarity,
+                    "text": r.page_content[:300],
+                }
+
+        # Return all found pages sorted by relevance (no minimum threshold)
+        matching = sorted(
+            seen_pages.values(),
+            key=lambda x: x["similarity"],
+            reverse=True,
+        )
+
+        return {"pages": list(matching), "total_indexed": len(seen_pages)}
+    except Exception as e:
+        print(f"Document page search error: {e}")
+        return {"pages": []}
+
 
 # ------------------ VIEW DOCUMENT ------------------
 

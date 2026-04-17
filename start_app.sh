@@ -1,11 +1,7 @@
 #!/bin/bash
 
-# Replace the placeholder in the master Nginx config with the actual port
-echo "[INIT] Configuring Nginx to listen on port $PORT..."
-sed -i "s/REPLACE_PORT/$PORT/g" /etc/nginx/nginx.conf
-
 # Start Nginx in the background
-echo "[INIT] Starting Nginx..."
+echo "[INIT] Starting Nginx on port 7860..."
 /usr/sbin/nginx -g "daemon off;" &
 
 # Start the FastAPI backend

@@ -31,33 +31,16 @@ This guide will show you how to deploy your application for **free** on Hugging 
    *Tip: Use the "Transaction Mode" pooled connection string from Supabase Settings -> Database.*
 
 ## Step 3: Deployment
-Hugging Face uses **Access Tokens** instead of passwords for Git operations.
-
-1. **Generate a Token**:
-   - Go to [Hugging Face Settings -> Tokens](https://huggingface.co/settings/tokens).
-   - Click **New token**.
-   - **Name**: `Space-Push`
-   - **Type**: **Write**.
-   - Click **Generate token** and **Copy** it.
-
-2. **Add the Remote** (if not already added):
+Hugging Face allows you to deploy by pushing your code to their Git repository.
+1. In your local terminal, add the Hugging Face remote:
    ```bash
    git remote add hf https://huggingface.co/spaces/YOUR_USERNAME/DocSearch-AI
    ```
-
-3. **Push your code**:
+2. Push your code:
    ```bash
    git push hf main
    ```
-   - When prompted for **Username**, enter your Hugging Face username (`jayasrip1808`).
-   - When prompted for **Password**, **PASTE THE ACCESS TOKEN** you copied earlier.
-
-   *Tip: If you want to avoid being asked for a token every time, run:*
-   ```bash
-   git remote set-url hf https://jayasrip1808:YOUR_TOKEN@huggingface.co/spaces/jayasrip1808/DocSearch-AI
-   ```
-
-4. Alternatively, you can upload the files directly to the **Files** tab in your Hugging Face Space.
+3. Alternatively, you can upload the files directly to the **Files** tab in your Hugging Face Space.
 
 ## Step 4: Verify
 1. Wait for Hugging Face to build and start your container (this takes ~5-10 minutes).
@@ -69,10 +52,3 @@ Hugging Face uses **Access Tokens** instead of passwords for Git operations.
 - **Search History**: Because we are using **Supabase**, your past queries and AI answers will stay saved even if the server restarts.
 - **Indexed Documents**: The free tier of Hugging Face does not have a persistent local disk. If the server restarts (e.g., after being idle), you may need to re-upload your PDFs to index them again.
   - *Solution*: If you need permanent file storage, you can enable "Persistent Storage" in the Hugging Face Space settings for a small monthly fee.
-
----
-
-### Pro-Tip: Using SQL Shell with Cloud DB
-Once you have your Supabase URI, you can connect to it from your local machine using:
-`psql "YOUR_SUPABASE_URI"`
-This lets you run queries and manage tables exactly like you do with your local database.

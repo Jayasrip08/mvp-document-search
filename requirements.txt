@@ -55,7 +55,7 @@ multidict==6.7.1
 mypy_extensions==1.1.0
 numpy==2.4.4
 oauthlib==3.3.1
-# onnxruntime removed to save memory
+onnxruntime
 openai==2.30.0
 opentelemetry-api==1.40.0
 opentelemetry-exporter-otlp-proto-common==1.40.0
@@ -112,6 +112,6 @@ zipp==3.23.0
 zstandard==0.25.0
 
 psycopg2-binary
-# sentence-transformers removed to save memory
-# langchain-huggingface removed to save memory
-# langchain-ollama removed to save memory
+sentence-transformers
+langchain-huggingface
+langchain-ollama
