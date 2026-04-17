@@ -66,7 +66,8 @@ function DocumentModal({ item, onClose, query }) {
   
   const totalMatches = item.matching_pages?.length || 0;
   const currentPage = item.matching_pages?.[matchIndex] || 1;
-  const pdfUrl = `http://127.0.0.1:8000/document/${item.file}?v=${Date.now()}#page=${currentPage}`;
+  const baseUrl = import.meta.env.VITE_API_URL || "/api";
+  const pdfUrl = `${baseUrl}/document/${item.file}?v=${Date.now()}#page=${currentPage}`;
 
   const nextMatch = () => setMatchIndex(prev => (prev + 1) % totalMatches);
   const prevMatch = () => setMatchIndex(prev => (prev - 1 + totalMatches) % totalMatches);
