@@ -319,6 +319,18 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
           </div>
 
           <div className="navbar-actions">
+            <button 
+              className="btn-danger-outline" 
+              onClick={handleReset} 
+              disabled={isResetting}
+              style={{ marginRight: '8px' }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '6px'}}>
+                <path d="M3 6h18m-2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
+              </svg>
+              {isResetting ? "Resetting..." : "Reset System"}
+            </button>
+
             <button
               id="theme-toggle-btn"
               className="theme-toggle"
