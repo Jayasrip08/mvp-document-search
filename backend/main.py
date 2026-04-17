@@ -6,10 +6,9 @@ load_dotenv()
 from fastapi import FastAPI, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 import fitz
 import os
@@ -170,8 +169,8 @@ async def async_load_documents():
         # Load Embeddings & Chroma in a thread to prevent blocking
         def load_models():
             global embeddings, db
-            print("[INIT] Loading HuggingFace Embeddings Model...")
-            embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+            print("[INIT] Connecting to OpenAI Embeddings API...")
+            embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
             print("[INIT] Connecting to ChromaDB...")
             db = Chroma(
                 persist_directory=CHROMA_PATH,
