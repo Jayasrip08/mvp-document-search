@@ -63,6 +63,7 @@ function App() {
   const [serverOnline, setServerOnline] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [focusedDoc, setFocusedDoc] = useState(null);
 
   /* Apply / remove .dark class on <html> */
   useEffect(() => {
@@ -185,10 +186,20 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
       } else {
         // ── Streaming via SSE ──────────────────────────
         try {
+          // Build conversation history from previous completed messages (last 6)
+          const history = messages
+            .filter(m => !m.loading && !m.streaming && m.content)
+            .slice(-6)
+            .map(m => ({ role: m.role, content: m.content }));
+
           const res = await fetch(`${API_URL}/chat-stream`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query: userQuery }),
+            body: JSON.stringify({
+              query: userQuery,
+              conversation_history: history,
+              ...(focusedDoc ? { focused_document: focusedDoc } : {})
+            }),
           });
 
           if (!res.ok) throw new Error(`Server error ${res.status}`);
@@ -302,6 +313,8 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
       setMessages([]);
       setHasSearched(false);
       setLastQuery("");
+      setDrawerItem(null);
+      setFocusedDoc(null);
       return;
     }
 
@@ -486,10 +499,12 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
           {/* Fixed Input Area */}
           <div className="chat-input-area">
             <div className="chat-input-wrapper">
-              <SearchBar 
+              <SearchBar
                 setLastQuery={setLastQuery}
                 fetchData={fetchData}
                 performSearch={performSearch}
+                focusedDoc={focusedDoc}
+                onClearFocus={() => setFocusedDoc(null)}
               />
             </div>
             <footer className="chat-footer">
@@ -505,6 +520,10 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
         item={drawerItem}
         query={lastQuery}
         onClose={() => setDrawerItem(null)}
+        onFocusDoc={(filename) => {
+          setFocusedDoc(filename);
+          setDrawerItem(null);
+        }}
       />
     </div>
   );

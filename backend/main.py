@@ -66,6 +66,8 @@ def init_db():
     try:
         cur.execute("ALTER TABLE search_history ADD COLUMN IF NOT EXISTS answer TEXT")
         cur.execute("ALTER TABLE search_history ADD COLUMN IF NOT EXISTS sources TEXT")
+        cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags TEXT")
+        cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS entities TEXT")
     except Exception as e:
         print(f"Migration note: {e}")
     conn.commit()
@@ -80,6 +82,9 @@ except Exception as e:
 # ------------------ FASTAPI ------------------
 
 app = FastAPI()
+
+import asyncio
+import threading
 
 app.add_middleware(
     CORSMiddleware,
@@ -229,19 +234,190 @@ Text: {text_preview[:1500]}"""
         print(f"Classification timeout or error: {e}")
         return "Unclassified"
 
-def generate_summary(text: str):
-    """Generates a 5-line summary using GPT."""
-    try:
-        prompt = f"""Summarize the following document in exactly 5 concise bullet points.
-Focus on: main purpose, parties involved, key obligations, payment/termination terms, and any notable clauses.
-Use clear, professional language.
+import re as _re
 
-Text: {text[:4000]}"""
-        response = llm.invoke(prompt)
-        return response.content.strip()
+CLAUSE_TYPES = [
+    "Payment Terms", "Termination for Convenience", "Termination for Cause",
+    "Indemnification", "Limitation of Liability", "Auto-Renewal",
+    "Confidentiality / NDA", "Force Majeure", "Governing Law",
+    "Dispute Resolution", "Intellectual Property", "Non-Compete", "Warranties",
+]
+
+def _extract_json_object(raw: str) -> str:
+    raw = _re.sub(r'```(?:json)?\s*', '', raw).strip().rstrip('`').strip()
+    m = _re.search(r'\{[\s\S]*\}', raw)
+    return m.group() if m else None
+
+def _extract_json_array(raw: str) -> str:
+    raw = _re.sub(r'```(?:json)?\s*', '', raw).strip().rstrip('`').strip()
+    m = _re.search(r'\[[\s\S]*\]', raw)
+    return m.group() if m else None
+
+def generate_summary(text: str) -> str:
+    """Returns a structured JSON summary of the document."""
+    fallback = json.dumps({"overview": "Summary not available.", "parties": [], "key_dates": [], "obligations": [], "risk_flags": []})
+    try:
+        prompt = f"""Analyze this legal/business document and return a JSON object with EXACTLY these keys:
+{{
+  "overview": "2-3 sentence description of the document purpose",
+  "parties": ["Name (Role)", "Name (Role)"],
+  "key_dates": [{{"label": "Effective Date", "value": "..."}}],
+  "obligations": ["Key obligation 1", "Key obligation 2"],
+  "risk_flags": ["Notable risk or important clause"]
+}}
+Return ONLY valid JSON. No markdown code blocks.
+
+Document:
+{text[:4000]}"""
+        raw = llm.invoke(prompt).content.strip()
+        extracted = _extract_json_object(raw)
+        if extracted:
+            json.loads(extracted)
+            return extracted
+        return fallback
     except Exception as e:
         print(f"Summarization error: {e}")
-        return "Summary not available."
+        return fallback
+
+def generate_clauses(text: str) -> str:
+    """Identifies clause types present in the document. Returns JSON array."""
+    try:
+        prompt = f"""Analyze this legal document and identify which clause types are present.
+Return a JSON array (present clauses only):
+[
+  {{"type": "Payment Terms", "excerpt": "short verbatim quote max 120 chars"}},
+  ...
+]
+Choose types ONLY from: {', '.join(CLAUSE_TYPES)}
+Return ONLY a valid JSON array. No markdown.
+
+Document:
+{text[:5000]}"""
+        raw = llm.invoke(prompt).content.strip()
+        extracted = _extract_json_array(raw)
+        if extracted:
+            json.loads(extracted)
+            return extracted
+        return "[]"
+    except Exception as e:
+        print(f"Clause extraction error: {e}")
+        return "[]"
+
+def generate_entities(text: str) -> str:
+    """Extracts named entities from the document. Returns JSON object."""
+    fallback = json.dumps({"parties": [], "amounts": [], "dates": [], "deadlines": []})
+    try:
+        prompt = f"""Extract named entities from this legal document.
+Return a JSON object with EXACTLY these keys:
+{{
+  "parties": [{{"name": "Company/Person", "role": "Client/Provider/etc"}}],
+  "amounts": [{{"value": "$50,000", "context": "annual fee"}}],
+  "dates": [{{"value": "January 1 2024", "context": "effective date"}}],
+  "deadlines": [{{"value": "30 days", "context": "termination notice"}}]
+}}
+Max 6 items per list. Return ONLY valid JSON. No markdown.
+
+Document:
+{text[:4000]}"""
+        raw = llm.invoke(prompt).content.strip()
+        extracted = _extract_json_object(raw)
+        if extracted:
+            json.loads(extracted)
+            return extracted
+        return fallback
+    except Exception as e:
+        print(f"Entity extraction error: {e}")
+        return fallback
+
+def _background_enrich(filename: str, full_text: str):
+    """Run summary/entities/clauses extraction in a background thread after upload."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        summary_json   = generate_summary(full_text[:4000])
+        entities_json  = generate_entities(full_text[:4000])
+        clauses_json   = generate_clauses(full_text[:5000])
+
+        cur.execute(
+            "UPDATE documents SET summary=%s, entities=%s, tags=%s WHERE filename=%s",
+            (summary_json, entities_json, clauses_json, filename)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"[ENRICH] Completed background analysis for {filename}")
+    except Exception as e:
+        print(f"[ENRICH] Error enriching {filename}: {e}")
+
+# ------------------ QUERY INTELLIGENCE ------------------
+
+_DATE_AMT_PATTERN = _re.compile(
+    r'\b(date|dates|when|period|duration|term\b|start\s+date|end\s+date|expire|expiry|'
+    r'expiration|effective\s+date|valid(ity)?|from\s+\w+\s+to|from\s+which|schedule|timeline|deadline|'
+    r'payment|pay(ment)?|amount|fee|fees|cost|price|rate|monthly|annual|yearly|'
+    r'quarterly|due\s+date|invoice|billing|charge|charges|total|how\s+much|how\s+long|'
+    r'renewal|renew|notice\s+period|days|months|years|since|between)\b',
+    _re.IGNORECASE
+)
+
+_OBLIGATION_PATTERN = _re.compile(
+    r'\b(obligation|obligations|duty|duties|responsible|responsibility|must\b|required\s+to|'
+    r'have\s+to|need\s+to|shall\b|vendor|client|party|parties|deliverable|deliverables|'
+    r'comply|compliance|what\s+does|what\s+must|what\s+should|who\s+is\s+responsible|'
+    r'service\s+provider|customer|contractor|supplier|licensee|licensor)\b',
+    _re.IGNORECASE
+)
+
+_RISK_PATTERN = _re.compile(
+    r'\b(risk|risks|risky|one.sided|unfair|red.flag|red\s+flags|problematic|concern|concerns|'
+    r'liability|exposure|dangerous|harsh|penalty\b|unilateral|unreasonable|clause\b|clauses\b|'
+    r'loophole|trap|issue|issues|review|audit|flag|flags|protect|protection|warning)\b',
+    _re.IGNORECASE
+)
+
+def is_date_amount_query(q: str) -> bool:
+    return bool(_DATE_AMT_PATTERN.search(q))
+
+def is_obligation_query(q: str) -> bool:
+    return bool(_OBLIGATION_PATTERN.search(q)) and not is_date_amount_query(q)
+
+def is_risk_query(q: str) -> bool:
+    return bool(_RISK_PATTERN.search(q)) and not is_date_amount_query(q) and not is_obligation_query(q)
+
+_DATE_AMT_PROMPT_EXTRA = """
+7. OUTPUT FORMAT (strictly follow this — no bullet points, no prose for data):
+   Start your answer with a markdown table using EXACTLY these columns:
+   | Document | Field | Value | Notes |
+   |----------|-------|-------|-------|
+   Fill one row per date/amount/period found. Examples of rows:
+   | saas-agreement.pdf | Start Date | 1 January 2023 | Effective date |
+   | saas-agreement.pdf | End Date | 31 December 2025 | Auto-renews unless terminated |
+   | saas-agreement.pdf | Monthly Fee | $5,000 | Payable on the 1st |
+   If a value is not in the excerpts, write "Not specified" — never guess.
+   After the table, write 2 sentences maximum summarising the key dates/amounts.
+"""
+
+_OBLIGATION_PROMPT_EXTRA = """
+7. OUTPUT FORMAT (strictly follow this — no bullet points, no prose for data):
+   Start your answer with a markdown table using EXACTLY these columns:
+   | Party | Obligation | Deadline / Condition |
+   |-------|-----------|----------------------|
+   Fill one row per obligation found. Use party names exactly as in the document.
+   If no deadline is stated write "Not specified".
+   After the table, write 2 sentences maximum summarising the key obligations.
+"""
+
+_RISK_PROMPT_EXTRA = """
+7. OUTPUT FORMAT (strictly follow this — no bullet points, no prose for data):
+   Start your answer with a markdown table using EXACTLY these columns:
+   | Clause / Section | Risk Level | Concern |
+   |-----------------|------------|---------|
+   Risk levels must be: High / Medium / Low only.
+   Only include clauses that are genuinely one-sided, unusual, or harmful.
+   Cite source documents using [1], [2] etc. in the Concern column.
+   After the table, write 2 sentences maximum summarising the top risks.
+"""
 
 # ------------------ PDF TEXT EXTRACT ------------------
 
@@ -308,18 +484,23 @@ async def search(file: UploadFile):
     if documents:
         db.add_documents(documents, ids=ids)
 
-    # 5. Search
-    # We use the extracted text to search from the updated DB
+    # 5. Fire background enrichment (summary + entities + clauses)
+    threading.Thread(
+        target=_background_enrich,
+        args=(file.filename, full_text),
+        daemon=True
+    ).start()
+
+    # 6. Search
     results = db.similarity_search_with_score(full_text[:5000], k=15)
     formatted = format_search_results(results)
-    
-    # Log to history
+
     log_to_history(
-        query=f"Uploaded: {file.filename}", 
-        answer=f"I have successfully indexed and analyzed **{file.filename}**.", 
+        query=f"Uploaded: {file.filename}",
+        answer=f"I have successfully indexed and analyzed **{file.filename}**.",
         sources=formatted.get("results", [])
     )
-    
+
     return formatted
 
 def format_search_results(results):
@@ -362,8 +543,14 @@ def format_search_results(results):
 
 # ------------------ TEXT SEARCH API ------------------
 
+class ConversationMessage(BaseModel):
+    role: str   # "user" | "assistant"
+    content: str
+
 class SearchQuery(BaseModel):
     query: str
+    focused_document: str | None = None
+    conversation_history: list[ConversationMessage] = []
 
 @app.post("/text-search")
 async def text_search(search: SearchQuery):
@@ -490,11 +677,33 @@ async def chat_stream(search: SearchQuery):
         return StreamingResponse(error_gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    # 1. Retrieve and filter relevant chunks
-    results_with_scores = db.similarity_search_with_score(search.query, k=12)
-    relevant_results = [r for r, score in results_with_scores if score < 0.85]
+    # 1. Classify query type
+    date_amt_query   = is_date_amount_query(search.query)
+    obligation_query = is_obligation_query(search.query)
+    risk_query       = is_risk_query(search.query)
+    structured_query = date_amt_query or obligation_query or risk_query
+    print(f"[QUERY TYPE] date={date_amt_query} obligation={obligation_query} risk={risk_query} query={search.query!r}")
+
+    # Build augmented retrieval query (blend current + recent history for better recall)
+    retrieval_query = search.query
+    if search.conversation_history:
+        recent = [m.content for m in search.conversation_history[-4:] if m.role == "user"]
+        if recent:
+            retrieval_query = search.query + " " + " ".join(recent[-2:])
+
+    k_val = 25 if structured_query else 15
+    score_threshold = 0.92 if structured_query else 0.88
+
+    if search.focused_document:
+        results_with_scores = db.similarity_search_with_score(
+            retrieval_query, k=k_val,
+            filter={"source": search.focused_document}
+        )
+    else:
+        results_with_scores = db.similarity_search_with_score(retrieval_query, k=k_val)
+    relevant_results = [r for r, score in results_with_scores if score < score_threshold]
     if not relevant_results:
-        relevant_results = [r for r, _ in results_with_scores[:4]]
+        relevant_results = [r for r, _ in results_with_scores[:5]]
 
     sources = list(set([r.metadata.get("source") for r in relevant_results]))
 
@@ -529,19 +738,61 @@ async def chat_stream(search: SearchQuery):
     ])
 
     # 4. Build prompt with citation instructions
+    chunk_size = 1200 if structured_query else 800
+
     if relevant_results:
         context_parts = []
+        seen_sources = set()
         for i, cr in enumerate(citation_results):
-            # Find matching chunk
-            for r, score in results_with_scores:
-                if r.metadata.get("source") == cr["file"] and r in relevant_results:
-                    context_parts.append(
-                        f"[{i+1}] Source: {cr['file']}, Page {r.metadata.get('page','?')}\n{r.page_content[:800]}"
-                    )
-                    break
+            # For structured queries include multiple chunks per source for completeness
+            if structured_query:
+                source_chunks = [
+                    (r, score) for r, score in results_with_scores
+                    if r.metadata.get("source") == cr["file"] and r in relevant_results
+                ]
+                for r, _ in source_chunks[:3]:
+                    chunk_key = (cr["file"], r.metadata.get("page","?"))
+                    if chunk_key not in seen_sources:
+                        seen_sources.add(chunk_key)
+                        context_parts.append(
+                            f"[{i+1}] Source: {cr['file']}, Page {r.metadata.get('page','?')}\n{r.page_content[:chunk_size]}"
+                        )
+            else:
+                for r, score in results_with_scores:
+                    if r.metadata.get("source") == cr["file"] and r in relevant_results:
+                        context_parts.append(
+                            f"[{i+1}] Source: {cr['file']}, Page {r.metadata.get('page','?')}\n{r.page_content[:chunk_size]}"
+                        )
+                        break
         context = "\n\n---\n\n".join(context_parts)
 
-        prompt = f"""You are a contract and legal document assistant. Answer questions based on the document excerpts provided.
+        focus_note = f"\nNOTE: The user is asking specifically about '{search.focused_document}'. Answer only from that document's content.\n" if search.focused_document else ""
+
+        if date_amt_query:
+            special_note = _DATE_AMT_PROMPT_EXTRA
+        elif obligation_query:
+            special_note = _OBLIGATION_PROMPT_EXTRA
+        elif risk_query:
+            special_note = _RISK_PROMPT_EXTRA
+        else:
+            special_note = ""
+
+        # Build conversation history block
+        history_block = ""
+        if search.conversation_history:
+            history_lines = []
+            for m in search.conversation_history[-6:]:  # last 3 exchanges
+                role_label = "User" if m.role == "user" else "Assistant"
+                history_lines.append(f"{role_label}: {m.content[:400]}")
+            history_block = "\nCONVERSATION HISTORY (for context):\n" + "\n".join(history_lines) + "\n"
+
+        format_instruction = (
+            "6. Be concise and professional. Use markdown formatting (**bold** for key terms, bullet points for lists)."
+            if not special_note else
+            "6. Be concise and professional. Use **bold** for key terms. Do NOT use bullet points — follow the table format in instruction 7 instead."
+        )
+
+        prompt = f"""You are a contract and legal document assistant. Answer questions based on the document excerpts provided.{focus_note}{history_block}
 
 AVAILABLE SOURCES:
 {source_list}
@@ -556,10 +807,11 @@ USER QUESTION: {search.query}
 INSTRUCTIONS:
 1. Answer using ONLY information from the DOCUMENT EXCERPTS above.
 2. Use inline citations like [1], [2] when referencing specific sources.
-3. If the exact phrase isn't used, look for equivalent legal meaning (e.g. "terminate without cause" = "termination for convenience").
-4. If truly no relevant information exists, say: "I could not find this information in the uploaded documents."
-5. Be concise, professional, and use markdown formatting (bullet points, **bold** for key terms).
-
+3. Consider the CONVERSATION HISTORY to understand what the user is referring to (e.g. "it", "that", "the agreement mentioned").
+4. If the exact phrase isn't used, look for equivalent legal meaning (e.g. "terminate without cause" = "termination for convenience", "penalty for late payment" = "interest on overdue amounts").
+5. IMPORTANT: If the document excerpts contain ANY relevant information even partially, use it to answer. Only say "I could not find this information" if the excerpts are truly unrelated.
+{format_instruction}
+{special_note}
 Answer:"""
     else:
         prompt = f"""You are a Document Assistant. The user's document library does not contain relevant content for this query.
@@ -616,35 +868,81 @@ No explanation, no markdown, just the JSON array."""
 @app.get("/summarize/{filename}")
 async def summarize_document(filename: str):
     try:
+        import urllib.parse
+        filename = urllib.parse.unquote(filename)
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT summary, id FROM documents WHERE filename = %s", (filename,))
+        cur.execute("SELECT summary, entities FROM documents WHERE filename = %s", (filename,))
         row = cur.fetchone()
-        
-        if row and row['summary']:
-            return {"summary": row['summary']}
 
-        # If no summary, generate it
+        structured = None
+        entities = None
+
+        if row and row['summary']:
+            try:
+                structured = json.loads(row['summary'])
+            except Exception:
+                structured = None  # old plain-text format — regenerate
+
+        if row and row.get('entities'):
+            try:
+                entities = json.loads(row['entities'])
+            except Exception:
+                entities = None
+
+        if structured is None or entities is None:
+            file_path = os.path.join(DOCS_PATH, filename)
+            if not os.path.exists(file_path):
+                return {"error": "File not found"}
+            doc = fitz.open(file_path)
+            text = "".join(doc[i].get_text() for i in range(min(5, len(doc))))
+
+            if structured is None:
+                summary_json = generate_summary(text)
+                cur.execute("UPDATE documents SET summary = %s WHERE filename = %s", (summary_json, filename))
+                structured = json.loads(summary_json)
+
+            if entities is None:
+                entities_json = generate_entities(text)
+                cur.execute("UPDATE documents SET entities = %s WHERE filename = %s", (entities_json, filename))
+                entities = json.loads(entities_json)
+
+            conn.commit()
+
+        cur.close()
+        conn.close()
+        return {"structured": structured, "entities": entities}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/clauses/{filename}")
+async def get_clauses(filename: str):
+    try:
+        import urllib.parse
+        filename = urllib.parse.unquote(filename)
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT tags FROM documents WHERE filename = %s", (filename,))
+        row = cur.fetchone()
+
+        if row and row['tags']:
+            return {"clauses": json.loads(row['tags'])}
+
         file_path = os.path.join(DOCS_PATH, filename)
         if not os.path.exists(file_path):
-            return {"error": "File not found"}
-        
+            return {"error": "File not found", "clauses": []}
+
         doc = fitz.open(file_path)
-        text = ""
-        for i in range(min(5, len(doc))): # Sumarize from first 5 pages
-            text += doc[i].get_text()
-        
-        summary = generate_summary(text)
-        
-        # Save to DB
-        cur.execute("UPDATE documents SET summary = %s WHERE filename = %s", (summary, filename))
+        text = "".join(doc[i].get_text() for i in range(min(8, len(doc))))
+        tags_json = generate_clauses(text)
+
+        cur.execute("UPDATE documents SET tags = %s WHERE filename = %s", (tags_json, filename))
         conn.commit()
         cur.close()
         conn.close()
-        
-        return {"summary": summary}
+        return {"clauses": json.loads(tags_json)}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e), "clauses": []}
 
 # ------------------ HISTORY API ------------------
 
@@ -801,14 +1099,20 @@ async def get_documents():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, filename, file_size, upload_time, category FROM documents ORDER BY upload_time DESC")
+        cur.execute("SELECT id, filename, file_size, upload_time, category, tags FROM documents ORDER BY upload_time DESC")
         docs = cur.fetchall()
         cur.close()
         conn.close()
-        # Ensure datetimes are serialized to strings
         for doc in docs:
             if doc['upload_time']:
                 doc['upload_time'] = doc['upload_time'].isoformat()
+            if doc.get('tags'):
+                try:
+                    doc['tags'] = json.loads(doc['tags'])
+                except Exception:
+                    doc['tags'] = []
+            else:
+                doc['tags'] = []
         return docs
     except Exception as e:
         print(f"Error fetching documents list: {e}")

@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 
-function SearchBar({ setLastQuery, fetchData, performSearch }) {
+function SearchBar({ setLastQuery, fetchData, performSearch, focusedDoc, onClearFocus }) {
   const [query, setQuery] = useState("");
   const [file, setFile] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -61,6 +61,21 @@ function SearchBar({ setLastQuery, fetchData, performSearch }) {
   return (
     <div className="search-bar-wrapper">
       <div className="glass-card search-card chat-search-card">
+        {focusedDoc && (
+          <div className="focused-doc-chip">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <span className="focused-doc-label">Focused:</span>
+            <span className="focused-doc-name">{focusedDoc}</span>
+            <button
+              type="button"
+              className="focused-doc-clear"
+              onClick={onClearFocus}
+              title="Search all documents"
+            >✕</button>
+          </div>
+        )}
         {file && (
           <div className="chat-file-chip">
             <span className="file-chip-icon">
@@ -106,7 +121,7 @@ function SearchBar({ setLastQuery, fetchData, performSearch }) {
           <div className="search-input-container chat-input-container">
             <input
               type="text"
-              placeholder={file ? "Add an optional message..." : "Message DocSearch AI..."}
+              placeholder={file ? "Add an optional message..." : focusedDoc ? `Ask anything about ${focusedDoc}…` : "Message DocSearch AI..."}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="search-input chat-input"

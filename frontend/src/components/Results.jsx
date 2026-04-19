@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
+import remarkGfm from "remark-gfm";
 
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -263,11 +264,11 @@ function MessageRow({ msg, onExpand, onCompare, compareItems, query, onFollowUp 
                 <div className="ai-text-content" ref={bodyRef}>
                   {msg.streaming ? (
                     <>
-                      <ReactMarkdown rehypePlugins={[rehypeRaw]}>{processedContent}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{processedContent}</ReactMarkdown>
                       <span className="streaming-cursor" />
                     </>
                   ) : (
-                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>{processedContent}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{processedContent}</ReactMarkdown>
                   )}
                 </div>
 

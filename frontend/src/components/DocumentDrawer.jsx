@@ -19,12 +19,12 @@ function getBadgeClass(score) {
   return "low";
 }
 
-/* Build keyword regex — include ALL query words ≥ 3 chars, not just non-stop-words */
+/* Build keyword regex — include query words ≥ 4 chars that are not stop words */
 function buildKeywordRegex(query) {
   if (!query) return null;
   const keywords = query.split(/\s+/)
     .map(w => w.replace(/[^a-zA-Z0-9]/g, "").toLowerCase())
-    .filter(w => w.length >= 3)
+    .filter(w => w.length >= 4 && !STOP_WORDS.has(w))
     .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   if (keywords.length === 0) return null;
   return new RegExp(`(${keywords.join("|")})`, "gi");
@@ -282,7 +282,23 @@ function SearchableText({ text, searchTerm, activeIdx, query }) {
   );
 }
 
-function DocumentDrawer({ item, query, onClose }) {
+const CLAUSE_COLORS = {
+  "Payment Terms":               { bg: "rgba(16,185,129,0.12)",  color: "#10b981" },
+  "Termination for Convenience": { bg: "rgba(239,68,68,0.12)",   color: "#ef4444" },
+  "Termination for Cause":       { bg: "rgba(239,68,68,0.1)",    color: "#f87171" },
+  "Indemnification":             { bg: "rgba(245,158,11,0.12)",  color: "#f59e0b" },
+  "Limitation of Liability":     { bg: "rgba(245,158,11,0.1)",   color: "#fbbf24" },
+  "Auto-Renewal":                { bg: "rgba(139,92,246,0.12)",  color: "#a78bfa" },
+  "Confidentiality / NDA":       { bg: "rgba(59,130,246,0.12)",  color: "#60a5fa" },
+  "Force Majeure":               { bg: "rgba(107,114,128,0.12)", color: "#9ca3af" },
+  "Governing Law":               { bg: "rgba(20,184,166,0.12)",  color: "#2dd4bf" },
+  "Dispute Resolution":          { bg: "rgba(236,72,153,0.12)",  color: "#f472b6" },
+  "Intellectual Property":       { bg: "rgba(99,102,241,0.12)",  color: "#818cf8" },
+  "Non-Compete":                 { bg: "rgba(234,179,8,0.12)",   color: "#eab308" },
+  "Warranties":                  { bg: "rgba(34,197,94,0.12)",   color: "#22c55e" },
+};
+
+function DocumentDrawer({ item, query, onClose, onFocusDoc }) {
   const [matchIndex, setMatchIndex]   = useState(0);
   const [allPages, setAllPages]       = useState([]);
   const [loadingPages, setLoadingPages] = useState(false);
@@ -294,6 +310,12 @@ function DocumentDrawer({ item, query, onClose }) {
   const [textSearch, setTextSearch]   = useState("");
   const [textMatchIdx, setTextMatchIdx] = useState(0);
   const textPanelRef = useRef(null);
+
+  // Summary + Clauses state
+  const [summaryData, setSummaryData]   = useState(null);
+  const [clausesData, setClausesData]   = useState(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+  const [loadingClauses, setLoadingClauses] = useState(false);
 
   /* Animate in */
   useEffect(() => {
@@ -313,6 +335,8 @@ function DocumentDrawer({ item, query, onClose }) {
     setAllPages(item.matching_pages || []);
     setTextSearch("");
     setTextMatchIdx(0);
+    setSummaryData(null);
+    setClausesData(null);
 
     if (!query || !item.file) { setLoadingPages(false); return; }
 
@@ -342,6 +366,28 @@ function DocumentDrawer({ item, query, onClose }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [item, allPages.length]);
 
+  /* Lazy-load summary when tab first opened */
+  useEffect(() => {
+    if (activeTab !== "summary" || !item?.file || summaryData) return;
+    setLoadingSummary(true);
+    fetch(`${API_URL}/summarize/${encodeURIComponent(item.file)}`)
+      .then(r => r.json())
+      .then(data => setSummaryData(data))
+      .catch(() => setSummaryData({ error: "Failed to load summary." }))
+      .finally(() => setLoadingSummary(false));
+  }, [activeTab, item?.file]);
+
+  /* Lazy-load clauses when tab first opened */
+  useEffect(() => {
+    if (activeTab !== "clauses" || !item?.file || clausesData) return;
+    setLoadingClauses(true);
+    fetch(`${API_URL}/clauses/${encodeURIComponent(item.file)}`)
+      .then(r => r.json())
+      .then(data => setClausesData(data.clauses || []))
+      .catch(() => setClausesData([]))
+      .finally(() => setLoadingClauses(false));
+  }, [activeTab, item?.file]);
+
   const handleClose = () => {
     setIsVisible(false);
     setTimeout(onClose, 280); // wait for slide-out animation
@@ -360,8 +406,8 @@ function DocumentDrawer({ item, query, onClose }) {
     .slice(0, 3).join(" ");
 
   const pdfUrl = `${API_URL}/document/${encodeURIComponent(item.file)}` +
-    `?v=${Date.now()}#page=${currentPage}` +
-    (searchTerms ? `&search=${encodeURIComponent(searchTerms)}` : "");
+    `#page=${currentPage}` +
+    (searchTerms ? `?search=${encodeURIComponent(searchTerms)}` : "");
 
   const handleCopyClause = () => {
     const text = item.full_text || item.text || "";
@@ -411,7 +457,7 @@ function DocumentDrawer({ item, query, onClose }) {
             <rect x="3" y="3" width="18" height="18" rx="2"/>
             <path d="M3 9h18M9 21V9"/>
           </svg>
-          PDF Preview
+          PDF
         </button>
         <button
           className={`drawer-tab${activeTab === "text" ? " active" : ""}`}
@@ -424,7 +470,32 @@ function DocumentDrawer({ item, query, onClose }) {
             <line x1="21" y1="14" x2="3" y2="14"/>
             <line x1="17" y1="18" x2="3" y2="18"/>
           </svg>
-          Extracted Text
+          Text
+        </button>
+
+        <button
+          className={`drawer-tab${activeTab === "summary" ? " active" : ""}`}
+          onClick={() => setActiveTab("summary")}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          Insights
+        </button>
+
+        <button
+          className={`drawer-tab${activeTab === "clauses" ? " active" : ""}`}
+          onClick={() => setActiveTab("clauses")}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5">
+            <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+            <line x1="7" y1="7" x2="7.01" y2="7"/>
+          </svg>
+          Clauses
         </button>
 
         {/* Page navigator lives in the tab bar right side */}
@@ -459,9 +530,139 @@ function DocumentDrawer({ item, query, onClose }) {
 
       {/* ── Content ───────────────────────────────── */}
       <div className="drawer-content">
-        {activeTab === "pdf" ? (
+        {activeTab === "summary" ? (
+          <div className="drawer-insights-panel">
+            {loadingSummary ? (
+              <div className="drawer-ai-loading">
+                <div className="sidebar-spinner" />
+                <span>Analyzing document…</span>
+              </div>
+            ) : summaryData?.error ? (
+              <div className="drawer-insights-error">{summaryData.error}</div>
+            ) : summaryData ? (
+              <>
+                {summaryData.structured?.overview && (
+                  <div className="insights-section">
+                    <div className="insights-section-title">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                      Overview
+                    </div>
+                    <p className="insights-overview">{summaryData.structured.overview}</p>
+                  </div>
+                )}
+
+                {summaryData.entities?.parties?.length > 0 && (
+                  <div className="insights-section">
+                    <div className="insights-section-title">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                      Key Parties
+                    </div>
+                    <div className="insights-entity-grid">
+                      {summaryData.entities.parties.map((p, i) => (
+                        <div key={i} className="insights-entity-chip">
+                          <span className="entity-name">{p.name}</span>
+                          {p.role && <span className="entity-role">{p.role}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(summaryData.entities?.dates?.length > 0 || summaryData.entities?.deadlines?.length > 0) && (
+                  <div className="insights-section">
+                    <div className="insights-section-title">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                      Dates &amp; Deadlines
+                    </div>
+                    <div className="insights-list">
+                      {[...(summaryData.entities.dates||[]), ...(summaryData.entities.deadlines||[])].map((d, i) => (
+                        <div key={i} className="insights-list-item">
+                          <span className="insights-list-value">{d.value}</span>
+                          <span className="insights-list-context">{d.context}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {summaryData.entities?.amounts?.length > 0 && (
+                  <div className="insights-section">
+                    <div className="insights-section-title">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                      Dollar Amounts
+                    </div>
+                    <div className="insights-list">
+                      {summaryData.entities.amounts.map((a, i) => (
+                        <div key={i} className="insights-list-item">
+                          <span className="insights-list-value amount">{a.value}</span>
+                          <span className="insights-list-context">{a.context}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {summaryData.structured?.obligations?.length > 0 && (
+                  <div className="insights-section">
+                    <div className="insights-section-title">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                      Key Obligations
+                    </div>
+                    <ul className="insights-bullet-list">
+                      {summaryData.structured.obligations.map((o, i) => (
+                        <li key={i}>{o}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {summaryData.structured?.risk_flags?.length > 0 && (
+                  <div className="insights-section">
+                    <div className="insights-section-title risk">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                      Risk Flags
+                    </div>
+                    <ul className="insights-bullet-list risk">
+                      {summaryData.structured.risk_flags.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            ) : null}
+          </div>
+        ) : activeTab === "clauses" ? (
+          <div className="drawer-clauses-panel">
+            {loadingClauses ? (
+              <div className="drawer-ai-loading">
+                <div className="sidebar-spinner" />
+                <span>Extracting clauses…</span>
+              </div>
+            ) : clausesData && clausesData.length > 0 ? (
+              <>
+                <div className="clauses-count">{clausesData.length} clause type{clausesData.length !== 1 ? "s" : ""} detected</div>
+                <div className="clauses-list">
+                  {clausesData.map((c, i) => {
+                    const style = CLAUSE_COLORS[c.type] || { bg: "rgba(107,114,128,0.12)", color: "#9ca3af" };
+                    return (
+                      <div key={i} className="clause-card">
+                        <span className="clause-tag-pill" style={{ background: style.bg, color: style.color }}>
+                          {c.type}
+                        </span>
+                        {c.excerpt && <p className="clause-excerpt">"{c.excerpt}"</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : clausesData !== null ? (
+              <div className="drawer-insights-error">No specific clause types detected.</div>
+            ) : null}
+          </div>
+        ) : activeTab === "pdf" ? (
           <iframe
-            key={`${item.file}-${currentPage}`}
+            key={item.file}
             src={pdfUrl}
             className="drawer-pdf-iframe"
             title="Document PDF"
@@ -516,35 +717,24 @@ function DocumentDrawer({ item, query, onClose }) {
 
       {/* ── Footer ───────────────────────────────── */}
       <div className="drawer-footer">
-        <button
-          className={`drawer-footer-btn${clauseCopied ? " success" : ""}`}
-          onClick={handleCopyClause}
-        >
-          {clauseCopied ? (
-            <>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.5">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-              Copied!
-            </>
-          ) : (
-            <>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.5">
-                <rect x="9" y="9" width="13" height="13" rx="2"/>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-              </svg>
-              Copy Clause
-            </>
-          )}
-        </button>
+        {onFocusDoc && (
+          <button
+            className="drawer-footer-btn accent focus-doc-btn"
+            onClick={() => onFocusDoc(item.file)}
+            title="Ask questions only about this document"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            Ask about this PDF
+          </button>
+        )}
 
         <a
           href={`${API_URL}/document/${encodeURIComponent(item.file)}`}
-          target="_blank"
-          rel="noreferrer"
+          download
           className="drawer-footer-btn"
+          title="Download PDF"
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" strokeWidth="2.5">
@@ -560,6 +750,7 @@ function DocumentDrawer({ item, query, onClose }) {
           target="_blank"
           rel="noreferrer"
           className="drawer-footer-btn accent"
+          title="Open full PDF in new tab"
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" strokeWidth="2.5">
