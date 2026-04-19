@@ -46,12 +46,14 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS search_history (
             id SERIAL PRIMARY KEY,
+            session_id VARCHAR(36),
             query TEXT NOT NULL,
             answer TEXT,
             sources TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON search_history(session_id);")
     # 3. Feedback table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS feedback (
@@ -66,6 +68,7 @@ def init_db():
     try:
         cur.execute("ALTER TABLE search_history ADD COLUMN IF NOT EXISTS answer TEXT")
         cur.execute("ALTER TABLE search_history ADD COLUMN IF NOT EXISTS sources TEXT")
+        cur.execute("ALTER TABLE search_history ADD COLUMN IF NOT EXISTS session_id VARCHAR(36)")
         cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags TEXT")
         cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS entities TEXT")
     except Exception as e:
@@ -200,14 +203,14 @@ async def async_load_documents():
 
 # ------------------ HELPERS ------------------
 
-def log_to_history(query, answer="", sources=None):
+def log_to_history(query, answer="", sources=None, session_id=None):
     """Helper to log interactions to the PostgreSQL history table."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO search_history (query, answer, sources) VALUES (%s, %s, %s)", 
-            (query, answer, json.dumps(sources) if sources else "[]")
+            "INSERT INTO search_history (query, answer, sources, session_id) VALUES (%s, %s, %s, %s)", 
+            (query, answer, json.dumps(sources) if sources else "[]", session_id)
         )
         conn.commit()
         cur.close()
@@ -498,7 +501,8 @@ async def search(file: UploadFile):
     log_to_history(
         query=f"Uploaded: {file.filename}",
         answer=f"I have successfully indexed and analyzed **{file.filename}**.",
-        sources=formatted.get("results", [])
+        sources=formatted.get("results", []),
+        session_id=None # Uploads don't necessarily belong to a session, or we could pass one
     )
 
     return formatted
@@ -550,6 +554,7 @@ class ConversationMessage(BaseModel):
 class SearchQuery(BaseModel):
     query: str
     focused_document: str | None = None
+    session_id: str | None = None
     conversation_history: list[ConversationMessage] = []
 
 @app.post("/text-search")
@@ -564,7 +569,8 @@ async def text_search(search: SearchQuery):
     log_to_history(
         query=search.query, 
         answer=f"I found {formatted.get('count', 0)} relevant snippets for your query.", 
-        sources=formatted.get("results", [])
+        sources=formatted.get("results", []),
+        session_id=search.session_id
     )
     
     return formatted
@@ -655,7 +661,7 @@ Answer:"""
         citation_results = sorted(grouped.values(), key=lambda x: x["similarity"], reverse=True)
 
         # Log to history
-        log_to_history(query=search.query, answer=answer_text, sources=sources)
+        log_to_history(query=search.query, answer=answer_text, sources=sources, session_id=search.session_id)
 
         return {
             "answer": answer_text,
@@ -836,7 +842,7 @@ Answer:"""
         yield "data: [DONE]\n\n"
 
         # Log to history after streaming completes
-        log_to_history(query=search.query, answer=full_answer, sources=sources)
+        log_to_history(query=search.query, answer=full_answer, sources=sources, session_id=search.session_id)
 
         # Generate follow-up questions
         try:
@@ -948,16 +954,61 @@ async def get_clauses(filename: str):
 
 @app.get("/history")
 async def get_history():
+    """Returns a list of unique sessions with their most recent query."""
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, query, answer, sources, timestamp FROM search_history ORDER BY timestamp DESC LIMIT 20")
+        # Group by session_id and get the latest query for each session
+        cur.execute("""
+            SELECT DISTINCT ON (COALESCE(session_id, 'legacy-' || id::text))
+                id, 
+                query, 
+                answer, 
+                sources, 
+                timestamp, 
+                COALESCE(session_id, 'legacy-' || id::text) as session_id
+            FROM search_history 
+            ORDER BY COALESCE(session_id, 'legacy-' || id::text), timestamp DESC 
+            LIMIT 50
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        # Sort by timestamp descending
+        rows.sort(key=lambda x: x['timestamp'], reverse=True)
+        return rows
+    except Exception as e:
+        print(f"History fetch error: {e}")
+        return []
+
+@app.get("/history/session/{session_id}")
+async def get_session_history(session_id: str):
+    """Returns all messages for a specific session."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        if session_id.startswith("legacy-"):
+            # If it's a legacy item, return the original record PLUS any continuations
+            legacy_id = session_id.split("-")[1]
+            cur.execute("""
+                SELECT query, answer, sources, timestamp 
+                FROM search_history 
+                WHERE id = %s OR session_id = %s 
+                ORDER BY timestamp ASC
+            """, (legacy_id, session_id))
+        else:
+            cur.execute("""
+                SELECT query, answer, sources, timestamp 
+                FROM search_history 
+                WHERE session_id = %s 
+                ORDER BY timestamp ASC
+            """, (session_id,))
         rows = cur.fetchall()
         cur.close()
         conn.close()
         return rows
     except Exception as e:
-        print(f"History fetch error: {e}")
+        print(f"Session history fetch error: {e}")
         return []
 
 @app.delete("/history/{item_id}")

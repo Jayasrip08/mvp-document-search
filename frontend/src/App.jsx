@@ -64,6 +64,10 @@ function App() {
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [focusedDoc, setFocusedDoc] = useState(null);
+  const [sessionId, setSessionId] = useState(() => {
+    const saved = localStorage.getItem("docsearch-session");
+    return saved || crypto.randomUUID();
+  });
 
   /* Apply / remove .dark class on <html> */
   useEffect(() => {
@@ -75,6 +79,10 @@ function App() {
       localStorage.setItem("docsearch-theme", "light");
     }
   }, [dark]);
+
+  useEffect(() => {
+    localStorage.setItem("docsearch-session", sessionId);
+  }, [sessionId]);
 
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -198,6 +206,7 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
             body: JSON.stringify({
               query: userQuery,
               conversation_history: history,
+              session_id: sessionId,
               ...(focusedDoc ? { focused_document: focusedDoc } : {})
             }),
           });
@@ -308,8 +317,11 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
     }
   };
 
-  const handleHistoryAction = (item) => {
+  const handleHistoryAction = async (item) => {
     if (!item) {
+      // New Chat logic
+      const newId = crypto.randomUUID();
+      setSessionId(newId);
       setMessages([]);
       setHasSearched(false);
       setLastQuery("");
@@ -325,25 +337,36 @@ const API_URL = import.meta.env.VITE_API_URL || "/api";
 
     setHasSearched(true);
     setLastQuery(item.query);
+    setSessionId(item.session_id);
     
-    let parsedSources = [];
+    // Fetch full session history
     try {
-      parsedSources = typeof item.sources === 'string' ? JSON.parse(item.sources) : (item.sources || []);
-    } catch(e) { console.error("Source parse failed", e); }
+      const res = await fetch(`${API_URL}/history/session/${item.session_id}`);
+      const data = await res.json();
+      
+      const historicalMessages = [];
+      data.forEach(msg => {
+        let parsedSources = [];
+        try {
+          parsedSources = typeof msg.sources === 'string' ? JSON.parse(msg.sources) : (msg.sources || []);
+        } catch(e) { console.error("Source parse failed", e); }
 
-    const hasRichResults = parsedSources.length > 0 && typeof parsedSources[0] === 'object' && parsedSources[0].file;
+        const hasRichResults = parsedSources.length > 0 && typeof parsedSources[0] === 'object' && parsedSources[0].file;
 
-    const historicalMessages = [
-      { role: "user", content: item.query },
-      { 
-        role: "assistant", 
-        content: item.answer || "No response saved.", 
-        results: hasRichResults ? parsedSources : [],
-        sources: !hasRichResults ? parsedSources : [],
-        loading: false 
-      }
-    ];
-    setMessages(historicalMessages);
+        historicalMessages.push({ role: "user", content: msg.query });
+        historicalMessages.push({ 
+          role: "assistant", 
+          content: msg.answer || "No response saved.", 
+          results: hasRichResults ? parsedSources : [],
+          sources: !hasRichResults ? parsedSources : [],
+          loading: false 
+        });
+      });
+      setMessages(historicalMessages);
+    } catch (err) {
+      console.error("Failed to load session history:", err);
+      showToast("Failed to load conversation history.", "error");
+    }
   };
 
   const handleDeleteHistory = async (itemId) => {

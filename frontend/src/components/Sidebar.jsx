@@ -299,7 +299,7 @@ function Sidebar({ isOpen, setIsOpen, history, onHistoryClick, onDeleteHistory }
                     {items.map((item, i) => (
                       <div
                         key={i}
-                        className="history-item"
+                        className={`history-item${item.id === history[0]?.id ? "" : ""}`}
                         onClick={() => handleHistoryItemClick(item)}
                         title={item.query}
                       >
