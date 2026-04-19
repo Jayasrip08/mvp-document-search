@@ -22,7 +22,7 @@ import asyncio
 
 # ------------------ DATABASE ------------------
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/postgres")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:root@localhost:5432/postgres")
 
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
